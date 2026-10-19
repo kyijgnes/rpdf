@@ -1,0 +1,229 @@
+"""색·여백·글꼴 한 곳. 알PDF 기본 스킨(흰 바탕·옅은 회색 띠·빨간 강조) 을 따른다.
+
+화살표(⌄)·체크 표시는 Qt 기본 그림(테마마다 모양이 달라 하늘색 네모가 섞임) 대신 여기서 같은 굵기로 그려 쓴다.
+"""
+from __future__ import annotations
+
+import os
+import tempfile
+
+ACCENT = "#E8383D"        # 알PDF 빨강
+ACCENT_DARK = "#C9272C"
+BG = "#FFFFFF"
+BAR = "#F7F7F8"           # 리본·상태줄 바탕
+BAR_LINE = "#E3E3E6"
+CANVAS = "#EDEEF0"        # 문서 뒤 회색
+TEXT = "#222326"
+TEXT_DIM = "#8A8C91"
+HOVER = "#F0F0F2"
+PRESSED = "#E6E6E9"
+SELECT_BG = "#FDECEC"
+FONT = "Malgun Gothic"
+
+LIGHT = {"BG": BG, "BAR": BAR, "BAR_LINE": BAR_LINE, "CANVAS": CANVAS, "TEXT": TEXT, "TEXT_DIM": TEXT_DIM,
+         "HOVER": HOVER, "PRESSED": PRESSED, "SELECT_BG": SELECT_BG, "FIELD": "#FFFFFF", "FIELD_LINE": "#D9DADE",
+         "SCROLL": "#CDCED2", "SCROLL_HOVER": "#AEB0B5", "WARN_BG": "#FDEBEC", "WARN_LINE": "#F5C9CB"}
+DARK = {"BG": "#1F2023", "BAR": "#26272B", "BAR_LINE": "#35363B", "CANVAS": "#141517", "TEXT": "#E6E6E8",
+        "TEXT_DIM": "#8E9095", "HOVER": "#2E2F33", "PRESSED": "#393A3F", "SELECT_BG": "#3A2426", "FIELD": "#2A2B2F",
+        "FIELD_LINE": "#45464C", "SCROLL": "#4A4B51", "SCROLL_HOVER": "#62636A", "WARN_BG": "#3A2426", "WARN_LINE": "#5A3033"}
+
+CUR: dict = dict(LIGHT)  # 지금 테마. 아이콘이 그릴 때 여기 색을 쓴다(qss() 가 바꿈)
+
+
+def _images(c: dict, dark: bool) -> dict[str, str]:
+    """화살표·체크 그림을 1배·2배로 그려 임시 폴더에 둔다. QSS 는 url 의 @2x 를 고해상도 화면에서 알아서 쓴다."""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+
+    folder = os.path.join(tempfile.gettempdir(), "pdfeditor_qss")
+    os.makedirs(folder, exist_ok=True)
+    shapes = {  # 이름: (가로, 세로, 선 색, 점들[0~1], 굵기)
+        "down": (10, 6, c["TEXT_DIM"], [(0.1, 0.15), (0.5, 0.85), (0.9, 0.15)], 1.3),
+        "up": (10, 6, c["TEXT_DIM"], [(0.1, 0.85), (0.5, 0.15), (0.9, 0.85)], 1.3),
+        "check": (10, 8, "#FFFFFF", [(0.08, 0.5), (0.38, 0.85), (0.92, 0.12)], 1.6),
+        "dot": (8, 8, "#FFFFFF", None, 0),
+    }
+    out = {}
+    for name, (w, h, col, pts, lw) in shapes.items():
+        base = os.path.join(folder, f"{'dark' if dark else 'light'}_{name}")
+        for scale, suffix in ((1, ""), (2, "@2x")):
+            pm = QPixmap(w * scale, h * scale)
+            pm.fill(Qt.GlobalColor.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            if pts:
+                p.setPen(QPen(QColor(col), lw * scale, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+                path = QPainterPath(QPointF(pts[0][0] * w * scale, pts[0][1] * h * scale))
+                for x, y in pts[1:]:
+                    path.lineTo(x * w * scale, y * h * scale)
+                p.drawPath(path)
+            else:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(col))
+                p.drawEllipse(QPointF(w * scale / 2, h * scale / 2), w * scale * 0.22, h * scale * 0.22)
+            p.end()
+            pm.save(base + suffix + ".png")
+        out[name] = (base + ".png").replace("\\", "/")
+    return out
+
+
+def qss(dark: bool = False) -> str:
+    c = dict(DARK if dark else LIGHT)
+    c.update(ACCENT=ACCENT, ACCENT_DARK=ACCENT_DARK, FONT=FONT)
+    CUR.clear(); CUR.update(c)
+    try:
+        img = _images(c, dark)
+    except Exception:  # noqa: BLE001  (그림을 못 만들면 Qt 기본 화살표로)
+        img = {}
+    down, up, check, dot = (f'url("{img[k]}")' if k in img else "none" for k in ("down", "up", "check", "dot"))
+    return f"""
+    * {{ font-family: "{c['FONT']}"; font-size: 9pt; color: {c['TEXT']}; }}
+    QMainWindow, QDialog, QWidget#central {{ background: {c['BG']}; }}
+    QWidget#titlebar {{ background: {c['BAR']}; border-bottom: 1px solid {c['BAR_LINE']}; }}
+    QWidget#ribbon {{ background: {c['BG']}; border-bottom: 1px solid {c['BAR_LINE']}; }}
+    QWidget#ribbonbar {{ background: {c['BG']}; }}
+    QWidget#statusbar {{ background: {c['BAR']}; border-top: 1px solid {c['BAR_LINE']}; }}
+    QWidget#statusbar QLabel {{ color: {c['TEXT_DIM']}; }}
+    QWidget#navstrip, QWidget#rightstrip {{ background: {c['BAR']}; }}
+    QWidget#navstrip {{ border-right: 1px solid {c['BAR_LINE']}; }}
+    QWidget#rightstrip {{ border-left: 1px solid {c['BAR_LINE']}; }}
+    QWidget#sidepanel {{ background: {c['BG']}; border-right: 1px solid {c['BAR_LINE']}; }}
+    QWidget#proppanel {{ background: {c['BG']}; border-left: 1px solid {c['BAR_LINE']}; }}
+    QWidget#printleft {{ background: {c['CANVAS']}; }}
+    QWidget#printright {{ background: {c['BG']}; border-left: 1px solid {c['BAR_LINE']}; }}
+
+    /* 패널 머리(썸네일·북마크·주석…): 높이·글자·밑줄을 한 모양으로 */
+    QWidget#panelhead {{ background: {c['BG']}; border-bottom: 1px solid {c['BAR_LINE']}; }}
+    QLabel#paneltitle {{ font-weight: bold; padding: 0; }}
+    QLabel#section {{ color: {c['TEXT_DIM']}; font-size: 8pt; padding: 8px 0 2px 0; }}
+
+    /* 리본 탭: 고른 탭을 굵게 하면 글자 폭이 달라져 줄이 출렁인다. 색과 밑줄로만 */
+    QToolButton#ribbontab {{ background: transparent; border: none; border-bottom: 2px solid transparent;
+        padding: 7px 12px 5px 12px; color: {c['TEXT']}; }}
+    QToolButton#ribbontab:hover {{ color: {c['ACCENT']}; }}
+    QToolButton#ribbontab:checked {{ color: {c['ACCENT']}; border-bottom: 2px solid {c['ACCENT']}; }}
+    QToolButton#ribbontab:disabled {{ color: {c['TEXT_DIM']}; }}
+    QToolButton#filetab {{ background: transparent; border: none; padding: 7px 12px 5px 10px; }}
+    QToolButton#filetab:hover {{ color: {c['ACCENT']}; }}
+
+    /* 리본 단추 */
+    QToolButton#rb {{ background: transparent; border: none; border-radius: 4px; padding: 4px 8px; }}
+    QToolButton#rb:hover {{ background: {c['HOVER']}; }}
+    QToolButton#rb:pressed {{ background: {c['PRESSED']}; }}
+    QToolButton#rb:checked {{ background: {c['SELECT_BG']}; color: {c['ACCENT']}; }}
+    QToolButton#rb:disabled {{ color: {c['TEXT_DIM']}; }}
+    QToolButton#rb[drop="true"] {{ padding-right: 18px; }}
+    QToolButton#rb::menu-indicator {{ image: {down}; subcontrol-origin: padding; subcontrol-position: right center;
+        right: 6px; width: 10px; height: 6px; }}
+    QToolButton#rb[split="true"] {{ padding-right: 20px; }}
+    QToolButton#rb::menu-button {{ border: none; background: transparent; width: 16px;
+        border-top-right-radius: 4px; border-bottom-right-radius: 4px; }}
+    QToolButton#rb::menu-button:hover {{ background: {c['PRESSED']}; }}
+    QToolButton#rb::menu-arrow {{ image: {down}; width: 10px; height: 6px; }}
+    QToolButton#quick {{ background: transparent; border: none; padding: 4px; border-radius: 4px; }}
+    QToolButton#quick:hover {{ background: {c['HOVER']}; }}
+    QToolButton#quick:pressed {{ background: {c['PRESSED']}; }}
+    QToolButton#quick:checked {{ background: {c['SELECT_BG']}; }}
+    QToolButton#quick:disabled {{ color: {c['TEXT_DIM']}; }}
+    QToolButton#quick::menu-indicator {{ image: none; width: 0; }}
+    QFrame#vsep {{ color: {c['BAR_LINE']}; margin: 0 4px; }}
+
+    /* 왼쪽·오른쪽 세로 막대 */
+    QToolButton#nav {{ background: transparent; border: none; border-left: 2px solid transparent; padding: 8px 6px; }}
+    QToolButton#nav:hover {{ background: {c['HOVER']}; }}
+    QToolButton#nav:checked {{ background: {c['BG']}; border-left: 2px solid {c['ACCENT']}; }}
+
+    /* 문서 탭 */
+    QTabBar#doctabs::tab {{ background: transparent; border: none; border-top: 2px solid transparent;
+        padding: 6px 10px 6px 12px; min-width: 120px; max-width: 220px; color: {c['TEXT_DIM']}; }}
+    QTabBar#doctabs::tab:selected {{ background: {c['BG']}; border-top: 2px solid {c['ACCENT']}; color: {c['TEXT']}; }}
+    QTabBar#doctabs::tab:hover:!selected {{ background: {c['HOVER']}; }}
+    QTabBar#doctabs::close-button {{ subcontrol-position: right; }}
+
+    /* 단추·입력칸 */
+    QPushButton {{ background: {c['FIELD']}; border: 1px solid {c['FIELD_LINE']}; border-radius: 4px; padding: 5px 14px;
+        min-height: 16px; }}
+    QPushButton:hover {{ background: {c['HOVER']}; }}
+    QPushButton:pressed {{ background: {c['PRESSED']}; }}
+    QPushButton:default, QPushButton#accent {{ background: {c['ACCENT']}; color: white; border-color: {c['ACCENT']}; }}
+    QPushButton:default:hover, QPushButton#accent:hover {{ background: {c['ACCENT_DARK']}; border-color: {c['ACCENT_DARK']}; }}
+    QPushButton:disabled {{ color: {c['TEXT_DIM']}; }}
+    QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit, QPlainTextEdit {{
+        background: {c['FIELD']}; border: 1px solid {c['FIELD_LINE']}; border-radius: 4px; padding: 3px 6px;
+        min-height: 18px; selection-background-color: {c['ACCENT']}; selection-color: white; }}
+    QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {{ border-color: {c['SCROLL_HOVER']}; }}
+    QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus, QPlainTextEdit:focus {{
+        border-color: {c['ACCENT']}; }}
+    QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {{ color: {c['TEXT_DIM']}; }}
+    QComboBox {{ padding-right: 18px; }}
+    QComboBox QLineEdit {{ border: none; padding: 0; margin: 0; background: transparent; min-height: 0; }}
+    QComboBox::drop-down {{ border: none; width: 18px; subcontrol-origin: padding; subcontrol-position: right center; }}
+    QComboBox::down-arrow {{ image: {down}; width: 10px; height: 6px; }}
+    QComboBox QAbstractItemView {{ background: {c['BG']}; border: 1px solid {c['BAR_LINE']}; padding: 2px;
+        selection-background-color: {c['HOVER']}; selection-color: {c['TEXT']}; outline: none; }}
+    QAbstractSpinBox {{ padding-right: 18px; }}
+    QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{ border: none; background: transparent; width: 16px; }}
+    QAbstractSpinBox::up-button {{ subcontrol-position: top right; margin-top: 2px; }}
+    QAbstractSpinBox::down-button {{ subcontrol-position: bottom right; margin-bottom: 2px; }}
+    QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover {{ background: {c['HOVER']}; border-radius: 3px; }}
+    QAbstractSpinBox::up-arrow {{ image: {up}; width: 8px; height: 5px; }}
+    QAbstractSpinBox::down-arrow {{ image: {down}; width: 8px; height: 5px; }}
+    QCheckBox, QRadioButton {{ spacing: 6px; background: transparent; }}
+    QCheckBox::indicator, QRadioButton::indicator, QListView::indicator, QTreeView::indicator {{
+        width: 14px; height: 14px; border: 1px solid {c['FIELD_LINE']}; background: {c['FIELD']}; }}
+    QCheckBox::indicator, QListView::indicator, QTreeView::indicator {{ border-radius: 3px; }}
+    QRadioButton::indicator {{ border-radius: 8px; }}
+    QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color: {c['ACCENT']}; }}
+    QCheckBox::indicator:checked, QListView::indicator:checked, QTreeView::indicator:checked {{
+        background: {c['ACCENT']}; border-color: {c['ACCENT']}; image: {check}; }}
+    QRadioButton::indicator:checked {{ background: {c['ACCENT']}; border-color: {c['ACCENT']}; image: {dot}; }}
+    QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{ background: {c['HOVER']}; }}
+
+    /* 목록 */
+    QListWidget, QTreeWidget, QTreeView, QListView, QTableWidget {{ background: {c['BG']}; border: none;
+        selection-background-color: {c['SELECT_BG']}; selection-color: {c['TEXT']}; outline: none; }}
+    QListWidget::item, QTreeWidget::item {{ padding: 3px 2px; }}
+    QListWidget::item:selected, QTreeWidget::item:selected {{ background: {c['SELECT_BG']}; color: {c['TEXT']}; }}
+    QListWidget::item:hover:!selected, QTreeWidget::item:hover:!selected {{ background: {c['HOVER']}; }}
+    QHeaderView {{ background: {c['BG']}; border: none; }}
+    QHeaderView::section {{ background: {c['BG']}; color: {c['TEXT_DIM']}; border: none;
+        border-bottom: 1px solid {c['BAR_LINE']}; padding: 4px 6px; }}
+
+    /* 스크롤바: 가늘게, 바탕 없이 */
+    QScrollBar:vertical {{ background: transparent; width: 9px; margin: 2px; }}
+    QScrollBar::handle:vertical {{ background: {c['SCROLL']}; border-radius: 2px; min-height: 30px; }}
+    QScrollBar::handle:vertical:hover {{ background: {c['SCROLL_HOVER']}; }}
+    QScrollBar:horizontal {{ background: transparent; height: 9px; margin: 2px; }}
+    QScrollBar::handle:horizontal {{ background: {c['SCROLL']}; border-radius: 2px; min-width: 30px; }}
+    QScrollBar::handle:horizontal:hover {{ background: {c['SCROLL_HOVER']}; }}
+    QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
+    QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+    QAbstractScrollArea::corner {{ background: transparent; }}
+
+    /* 메뉴 */
+    QMenu {{ background: {c['BG']}; border: 1px solid {c['BAR_LINE']}; border-radius: 6px; padding: 5px; }}
+    QMenu::item {{ padding: 6px 28px 6px 12px; border-radius: 4px; }}
+    QMenu::item:selected {{ background: {c['HOVER']}; }}
+    QMenu::item:disabled {{ color: {c['TEXT_DIM']}; }}
+    QMenu::separator {{ height: 1px; background: {c['BAR_LINE']}; margin: 5px 8px; }}
+    QMenu::right-arrow {{ image: none; }}
+
+    /* 그 밖 */
+    QSlider::groove:horizontal {{ height: 3px; background: {c['BAR_LINE']}; border-radius: 1px; }}
+    QSlider::sub-page:horizontal {{ background: {c['ACCENT']}; border-radius: 1px; }}
+    QSlider::handle:horizontal {{ width: 12px; height: 12px; margin: -5px 0; background: {c['ACCENT']}; border-radius: 6px; }}
+    QSlider::handle:horizontal:hover {{ background: {c['ACCENT_DARK']}; }}
+    QToolTip {{ background: {c['BG']}; color: {c['TEXT']}; border: 1px solid {c['BAR_LINE']}; padding: 4px 6px; }}
+    QGroupBox {{ border: 1px solid {c['BAR_LINE']}; border-radius: 6px; margin-top: 12px; padding: 10px 8px 6px 8px; }}
+    QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {c['TEXT_DIM']}; }}
+    QTabWidget::pane {{ border: 1px solid {c['BAR_LINE']}; border-radius: 6px; top: -1px; }}
+    QTabWidget QTabBar::tab {{ background: transparent; border: none; border-bottom: 2px solid transparent;
+        padding: 6px 12px; color: {c['TEXT_DIM']}; }}
+    QTabWidget QTabBar::tab:selected {{ color: {c['ACCENT']}; border-bottom: 2px solid {c['ACCENT']}; }}
+    QProgressBar {{ border: none; border-radius: 3px; background: {c['BAR_LINE']}; text-align: center; max-height: 6px; }}
+    QProgressBar::chunk {{ background: {c['ACCENT']}; border-radius: 3px; }}
+    QLabel#dim {{ color: {c['TEXT_DIM']}; }}
+    QLabel#warn {{ background: {c['WARN_BG']}; color: {c['ACCENT_DARK']}; padding: 6px 12px; border-bottom: 1px solid {c['WARN_LINE']}; }}
+    QFrame#card {{ background: {c['BG']}; border: 1px solid {c['BAR_LINE']}; border-radius: 6px; }}
+    QFrame#card:hover {{ border-color: {c['ACCENT']}; }}
+    """
