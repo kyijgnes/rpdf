@@ -18,6 +18,7 @@ GLYPH = {
     "first": 0xE892, "last": 0xE893, "prev": 0xE76B, "next": 0xE76C, "refresh": 0xE72C, "search": 0xE721,
     "check": 0xE73E, "add": 0xE710, "remove": 0xE738, "delete": 0xE74D, "copy": 0xE8C8, "paste": 0xE77F,
     "cut": 0xE8C6, "clipboard": 0xF0E3, "export": 0xEDE1, "import": 0xE8B5, "pin": 0xE718, "cloud": 0xE753,
+    "update": 0xE777,
     # 보기
     "zoomin": 0xE8A3, "zoomout": 0xE71F, "fitpage": 0xE9A6, "fitwidth": 0xE9A6, "actual": 0xE799,
     "fullscreen": 0xE740, "single": 0xE7C3, "continuous": 0xE8A4, "facing": 0xE736, "tile": 0xE8A9,
