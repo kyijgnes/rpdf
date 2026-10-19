@@ -29,7 +29,8 @@ SOURCE_ENV = "PDFAPP_UPDATE_SOURCE"
 AFTER_FLAG = "--after-update"               # setup 이 업데이트 뒤 다시 켤 때 붙인다
 REOPEN_KEY = "reopen_after_update"          # settings.json: 업데이트 직전에 열려 있던 문서
 _UA = {"User-Agent": f"PDFEditor-updater/{VERSION}"}   # 머리말은 latin-1 만 된다(앱 이름이 한글이라 쓰지 않음)
-_DOWNLOAD_DIR = os.path.join(tempfile.gettempdir(), "PDFEditor-update")
+# 받은 setup 은 내 사용자 폴더에만(TEMP 가 C:\Users\Public 아래로 잡힌 PC 가 있다. 남이 바꿔 끼울 수 있는 자리에서 실행하지 않게)
+_DOWNLOAD_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "Temp", "PDFEditor-update")
 _mutex = None
 
 
