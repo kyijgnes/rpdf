@@ -8,8 +8,8 @@ import os
 import threading
 import urllib.error
 
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
+from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMessageBox, QPushButton, QWidget
 
 from .. import updater as U
 from ..appinfo import VERSION
@@ -29,11 +29,14 @@ def _why(e: Exception) -> str:
 
 
 class UpdateUI(QObject):
-    """창이 하나씩 쥔다. `btn` 은 창이 상태줄에 놓는다(새 버전이 있을 때만 보인다)."""
+    """창이 하나씩 쥔다. `bar` 는 창이 문서 탭 줄 오른쪽에 놓는다(시작 화면에서는 상태줄이 숨으므로).
+    새 버전이 있으면 [새 버전 x 설치], 업데이트로 다시 켜졌으면 잠깐 「새 버전 x 설치 끝」. 평소에는 비어 있다."""
     def __init__(self, win):
         super().__init__(win)
         self.win = win
-        self.btn = QPushButton(); self.btn.setObjectName("accent"); self.btn.setFixedHeight(22); self.btn.hide()
+        self.bar = QWidget(); lay = QHBoxLayout(self.bar); lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(6)
+        self.note = QLabel(); self.note.setObjectName("dim"); self.note.hide(); lay.addWidget(self.note)
+        self.btn = QPushButton(); self.btn.setObjectName("accent"); self.btn.setFixedHeight(22); self.btn.hide(); lay.addWidget(self.btn)
         self.btn.clicked.connect(lambda: self.found and self.install(self.found))
         self.found: U.Release | None = None
         self._busy = False
@@ -42,6 +45,10 @@ class UpdateUI(QObject):
 
     def menu_label(self) -> str:
         return f"업데이트 확인 · 지금 {VERSION}"
+
+    def show_done(self):
+        self.note.setText(f"새 버전 {VERSION} 설치 끝"); self.note.show()
+        QTimer.singleShot(8000, self.note.hide)
 
     def auto_check(self):
         """켤 때 한 번. 설치본만, 닿지 않으면 아무 말 없이 넘어간다."""
@@ -117,4 +124,4 @@ def after_update(win, flagged: bool):
             if os.path.exists(p):
                 win.open_path(p)
     if flagged:
-        win.say(f"새 버전 {VERSION} 설치 끝")
+        win.updates.show_done()

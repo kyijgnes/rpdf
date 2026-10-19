@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
         tl.addWidget(self.doctabs)
         addb = QToolButton(); addb.setObjectName("quick"); addb.setIcon(icons.icon("add", 16)); addb.setToolTip("열기"); addb.clicked.connect(self.open_dialog)
         tl.addWidget(addb); tl.addStretch()
-        self.updates = UpdateUI(self); tl.addWidget(self.updates.btn)  # 새 버전이 있을 때만 [새 버전 x 설치]. 시작 화면에서도 보이는 줄
+        self.updates = UpdateUI(self); tl.addWidget(self.updates.bar)  # [새 버전 x 설치]·「설치 끝」. 시작 화면에서도 보이는 줄
         root.addWidget(tabrow)
         # 리본
         self.ribbon = Ribbon()
