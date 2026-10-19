@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,7 +15,7 @@ import webbrowser
 
 import fitz
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QColor, QFont, QImage, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtGui import QAction, QCloseEvent, QColor, QFont, QIcon, QImage, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtPrintSupport import QPrinterInfo
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QInputDialog,
                                QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QSlider, QSplitter, QStackedWidget,
@@ -32,7 +33,7 @@ from .sidebar import AnnotPanel, AttachmentPanel, BookmarkPanel, FieldPanel, Lay
 from .start import StartPage
 from .viewer import PageView
 
-from ..appinfo import APP_ID, APP_NAME  # noqa: E402
+from ..appinfo import APP_ID, APP_NAME, ICON, OLD_APP_IDS  # noqa: E402
 
 SETTINGS = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_ID, "settings.json")
 PDF_FILTER = "PDF 파일 (*.pdf);;모든 파일 (*)"
@@ -48,7 +49,24 @@ def _engine(name: str):
         raise RuntimeError(f"{name} 엔진을 아직 쓸 수 없습니다 ({e})") from e
 
 
+def _copy_old_settings():
+    """이름을 바꾸면 설정 폴더(%APPDATA% 아래 APP_ID 폴더)도 바뀐다. 새 자리가 비었으면 옛 이름 자리의 설정을 복사해 온다(옛 exe 도 그대로 쓰게 옮기지 않고 복사)."""
+    if os.path.exists(SETTINGS):
+        return
+    root = os.path.dirname(os.path.dirname(SETTINGS))
+    for old in OLD_APP_IDS:
+        src = os.path.join(root, old, "settings.json")
+        if old != APP_ID and os.path.isfile(src):
+            try:
+                os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
+                shutil.copy2(src, SETTINGS)
+            except OSError:
+                pass
+            return
+
+
 def load_settings() -> dict:
+    _copy_old_settings()
     try:
         with open(SETTINGS, encoding="utf-8") as f:
             return json.load(f)
@@ -181,7 +199,7 @@ class MainWindow(QMainWindow):
         self.prefs = self.settings["prefs"]
         self.setWindowTitle(APP_NAME)
         self.resize(1360, 820)
-        self.setWindowIcon(icons.icon("thumbs", 32, theme.ACCENT))
+        self.setWindowIcon(QIcon(ICON) if os.path.isfile(ICON) else icons.icon("thumbs", 32, theme.ACCENT))
         self.tabs: list[DocTab] = []
         self._build()
         self.apply_theme()

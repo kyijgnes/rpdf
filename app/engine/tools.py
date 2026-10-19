@@ -18,6 +18,7 @@ from typing import Callable, Iterable, Sequence
 
 import fitz
 
+from ..appinfo import APP_NAME
 from .annots import reset_widget, save_widget
 
 Progress = Callable[[int, int, str], None] | None
@@ -1154,8 +1155,8 @@ def print_pdf(path: str, printer: str | None = None, pages: Iterable[int] | None
                 win32api.ShellExecute(0, "print", send, None, ".", 0)
         except Exception as e:
             if getattr(e, "winerror", None) == 31 or (e.args and e.args[0] == 31):
-                # SE_ERR_NOASSOC: PDF 기본 앱에 「인쇄」 동작이 없다(알PDF·PDF 편집기 둘 다). 윈도우 문구는 엉뚱하다
-                raise EngineError("PDF 기본 앱에 인쇄 기능이 없어 보내지 못했습니다(PDF 편집기의 인쇄·일괄 인쇄를 쓰세요)") from e
+                # SE_ERR_NOASSOC: PDF 기본 앱에 「인쇄」 동작이 없다(알PDF·이 앱 둘 다). 윈도우 문구는 엉뚱하다
+                raise EngineError(f"PDF 기본 앱에 인쇄 기능이 없어 보내지 못했습니다({APP_NAME}의 인쇄·일괄 인쇄를 쓰세요)") from e
             raise EngineError(f"인쇄를 보내지 못했습니다 ({e})") from e
     return send
 
