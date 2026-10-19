@@ -32,8 +32,9 @@ from .sidebar import AnnotPanel, AttachmentPanel, BookmarkPanel, FieldPanel, Lay
 from .start import StartPage
 from .viewer import PageView
 
-APP_NAME = "PDF 편집기"
-SETTINGS = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "PDF편집기", "settings.json")
+from ..appinfo import APP_ID, APP_NAME  # noqa: E402
+
+SETTINGS = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_ID, "settings.json")
 PDF_FILTER = "PDF 파일 (*.pdf);;모든 파일 (*)"
 OPEN_FILTER = "PDF·이미지·문서 (*.pdf *.png *.jpg *.jpeg *.bmp *.tif *.tiff *.gif *.webp *.xps *.epub *.txt *.svg *.cbz);;PDF 파일 (*.pdf);;모든 파일 (*)"
 
@@ -1419,7 +1420,7 @@ class MainWindow(QMainWindow):
 
     def show_help(self):
         QMessageBox.information(self, "도움말",
-                                "PDF 편집기 (알PDF 대체)\n\n"
+                                f"{APP_NAME} (알PDF 대체)\n\n"
                                 "홈: 손·선택·확대, 모두 편집(원문 글자·그림 고치기), 텍스트 추가, OCR, 자르기, 검색\n"
                                 "편집: 텍스트·이미지·링크 추가, 워터마크·배경·머리글/바닥글·베이츠 번호\n"
                                 "주석: 연필·지우개·강조·밑줄·취소선·글상자·말풍선·노트·도형·스탬프·서명·첨부·측정\n"

@@ -1,4 +1,4 @@
-"""PyInstaller onedir 빌드. `python build.py` → dist\\PDF편집기\\PDF편집기.exe
+"""PyInstaller onedir 빌드. `python build.py` → dist\\<APP_ID>\\<APP_ID>.exe (이름은 app/appinfo.py)
 
 빌드는 한 번에 한 세션만(공용 규칙). 다른 빌드가 돌고 있으면 기다린다.
 """
@@ -10,7 +10,10 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-NAME = "PDF편집기"
+sys.path.insert(0, HERE)
+from app.appinfo import APP_ID  # noqa: E402
+
+NAME = APP_ID
 EXCLUDE = ("torch", "torchvision", "torchgen", "functorch", "scipy", "matplotlib", "mpl_toolkits", "pandas",
            "networkx", "sympy", "mpmath", "tqdm", "fsspec", "contourpy", "pytest", "_pytest", "IPython", "tkinter")
 

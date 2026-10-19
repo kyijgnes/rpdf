@@ -13,8 +13,10 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv[:1])
-    app.setApplicationName("PDF 편집기")
-    app.setOrganizationName("kyijgnes")
+    from .appinfo import APP_NAME, ORG, VERSION
+    app.setApplicationName(APP_NAME)
+    app.setOrganizationName(ORG)
+    app.setApplicationVersion(VERSION)
     app.setFont(QFont("Malgun Gothic", 9))
     from .ui.window import MainWindow
     w = MainWindow()
