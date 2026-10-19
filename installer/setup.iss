@@ -44,6 +44,8 @@ RestartApplications=no
 ChangesAssociations=yes
 ShowLanguageDialog=no
 SetupMutex={#AppMutex}.Setup
+; %TEMP%\Setup Log <날짜> #<번호>.txt (앱 안 업데이트는 PDFEditor-update\setup.log)
+SetupLogging=yes
 
 [Languages]
 Name: "ko"; MessagesFile: "compiler:Languages\Korean.isl"
