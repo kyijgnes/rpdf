@@ -1,0 +1,11 @@
+# RPDF 가 쓰는 패키지(GitHub Actions 빌드가 이것으로 깐다). 이 PC 에서 돌려 본 버전 그대로 묶는다
+PySide6==6.12.0
+PyMuPDF==1.27.2.3
+pikepdf==10.17.0
+pillow==12.2.0
+numpy==2.4.4
+psutil==7.2.2
+python-docx==1.2.0
+openpyxl==3.1.5
+python-pptx==1.0.2
+pywin32==311

@@ -1,6 +1,6 @@
-﻿; PDF 앱 설치 프로그램(Inno Setup 6). **release.py 로 만든다.**
-; 이름·버전·경로는 release.py 가 옆에 적는 defs.iss 에서 온다(이름은 app/appinfo.py 한 곳이라 여기에 박지 않는다).
-; 바꾸지 않는 열쇠(AppGuid·ProgId·RegKey·AppMutex·LegacyId)는 release.py 머리에 있다.
+﻿; PDF 앱 설치 프로그램(Inno Setup 6). **make_setup.py 로 만든다**(GitHub Actions 가 부름).
+; 이름·버전·경로는 make_setup.py 가 옆에 적는 defs.iss 에서 온다(이름은 app/appinfo.py 한 곳이라 여기에 박지 않는다).
+; 바꾸지 않는 열쇠(AppGuid·ProgId·RegKey·AppMutex·LegacyId)는 make_setup.py 머리에 있다.
 ;
 ; 하는 일: %LOCALAPPDATA%\Programs\<APP_ID> 에 관리자 권한 없이 설치, 시작 메뉴·바탕화면 바로 가기,
 ; .pdf 「연결 프로그램」 등록(기본 앱은 사람이 윈도우 설정에서 고른다), 설정 > 앱 의 제거.

@@ -1,7 +1,7 @@
 """PyInstaller onedir 빌드. `python build.py` → dist\\<APP_ID>\\<APP_ID>.exe (이름은 app/appinfo.py)
 
 빌드는 한 번에 한 세션만(공용 규칙). 다른 빌드가 돌고 있으면 기다린다.
-설치 프로그램을 만들고 GitHub 에 올리는 것은 release.py 가 한다(이 파일을 HEAD 사본에서 부른다).
+설치 프로그램은 make_setup.py, 새 버전 내기는 release.py(태그를 밀면 GitHub Actions 가 이 파일과 make_setup.py 를 돌린다).
 """
 from __future__ import annotations
 

@@ -1,0 +1,74 @@
+# 릴리스 만들기: RPDF 설치 프로그램(setup exe) + latest.json
+#
+# 태그를 밀면(v0.1.1 처럼) 윈도우 러너가 빌드(PyInstaller) → 설치 프로그램(Inno Setup) → 릴리스에 붙인다.
+# 태그는 release.py 가 만든다(버전 올리기·annotated 빈 태그·push). 손으로 setup 을 올리지 않는다.
+# 손으로 돌리려면 Actions 탭 > release > Run workflow (태그가 아니면 릴리스는 안 만들고 결과물만 남긴다).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      # 러너 콘솔은 cp1252 라 한글을 print 하면 죽는다. UTF-8 모드로 돌린다
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      # 버전은 app/appinfo.py 한 곳. 태그와 어긋나면 여기서 멈춘다
+      - name: 버전이 태그와 같은지
+        id: ver
+        shell: bash
+        run: |
+          v=$(python -c "import runpy;print(runpy.run_path('app/appinfo.py')['VERSION'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$v" ]]; then
+            echo "::error::태그 $GITHUB_REF_NAME 과 appinfo.py 의 VERSION $v 이 다르다"
+            exit 1
+          fi
+
+      - name: 준비물
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller==6.20.0
+
+      - name: 빌드(PyInstaller)
+        run: python build.py
+
+      # 러너에 깔린 Inno Setup 은 판이 오래됐을 수 있어(한국어 메시지 파일) 늘 최신으로 깐다
+      - name: Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: 설치 프로그램(Inno Setup)
+        run: python make_setup.py --out release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: setup
+          path: release/*
+
+      - name: 릴리스에 붙이기
+        # ★ 릴리스 노트(본문)를 쓰지 않는다. 제목(태그)과 받을 파일만 둔다(쿨다운과 같은 규칙).
+        #   body / body_path 를 넣지 말 것, generate_release_notes 도 켜지 말 것(자동 생성도 노트다).
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/PDFEditor-setup-${{ steps.ver.outputs.version }}.exe
+            release/latest.json
+          generate_release_notes: false
+          body: ""
+          make_latest: "true"

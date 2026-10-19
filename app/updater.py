@@ -1,7 +1,7 @@
 """새 버전 확인·받기·설치 시작. Qt 모름(화면 쪽은 ui/update.py).
 
 배포 자리는 GitHub 공개 저장소 RELEASE_REPO 의 릴리스다(2026-10-19 사용자 결정: 집·회사 어디서나 받게).
-릴리스마다 setup exe 와 latest.json 이 붙고(release.py 가 올림), 앱은 늘 같은 주소
+릴리스마다 setup exe 와 latest.json 이 붙고(태그를 밀면 GitHub Actions 가 올림, release.py·.github/workflows/release.yml), 앱은 늘 같은 주소
 `releases/latest/download/latest.json` 을 읽어 버전을 대조한다.
 시험할 때는 PDFAPP_UPDATE_SOURCE 에 폴더(latest.json 과 setup 이 든 곳)나 다른 주소를 주면 그곳을 본다.
 
@@ -22,9 +22,9 @@ from dataclasses import dataclass, field
 
 from .appinfo import VERSION
 
-RELEASE_REPO = "kyijgnes/pdf-app-releases"
+RELEASE_REPO = "kyijgnes/rpdf"   # 10-20 pdf-app-releases 에서 이름을 바꿈(옛 주소는 GitHub 이 넘겨 주어 0.1.0 도 여기를 찾는다)
 LATEST_URL = f"https://github.com/{RELEASE_REPO}/releases/latest/download/latest.json"
-MUTEX_NAME = "PDFEditor.kyijgnes.Running"   # setup 이 앱이 켜져 있는지 보는 이름(release.py 가 setup.iss 에 넘긴다)
+MUTEX_NAME = "PDFEditor.kyijgnes.Running"   # setup 이 앱이 켜져 있는지 보는 이름(make_setup.py 가 setup.iss 에 넘긴다)
 SOURCE_ENV = "PDFAPP_UPDATE_SOURCE"
 AFTER_FLAG = "--after-update"               # setup 이 업데이트 뒤 다시 켤 때 붙인다
 REOPEN_KEY = "reopen_after_update"          # settings.json: 업데이트 직전에 열려 있던 문서
