@@ -13,7 +13,17 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv[:1])
-    from .appinfo import APP_NAME, ORG, VERSION
+    from .appinfo import APP_ID, APP_NAME, ICON, ORG, VERSION
+    if sys.platform == "win32" and not getattr(sys, "frozen", False):
+        # python 으로 띄울 때 작업표시줄이 python 아이콘 대신 앱 아이콘을 쓰게(exe 는 exe 아이콘을 쓴다)
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(f"{ORG}.{APP_ID}.dev")
+        except Exception:  # noqa: BLE001
+            pass
+    if os.path.isfile(ICON):
+        from PySide6.QtGui import QIcon
+        app.setWindowIcon(QIcon(ICON))
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(ORG)
     app.setApplicationVersion(VERSION)
