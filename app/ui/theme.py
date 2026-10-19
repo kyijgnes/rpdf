@@ -10,7 +10,7 @@ import tempfile
 ACCENT = "#E8383D"        # 알PDF 빨강
 ACCENT_DARK = "#C9272C"
 BG = "#FFFFFF"
-BAR = "#F7F7F8"           # 리본·상태줄 바탕
+BAR = "#F4F5F7"           # 리본 단추 줄·상태줄·세로 막대 바탕
 BAR_LINE = "#E3E3E6"
 CANVAS = "#EDEEF0"        # 문서 뒤 회색
 TEXT = "#222326"
@@ -22,10 +22,13 @@ FONT = "Malgun Gothic"
 
 LIGHT = {"BG": BG, "BAR": BAR, "BAR_LINE": BAR_LINE, "CANVAS": CANVAS, "TEXT": TEXT, "TEXT_DIM": TEXT_DIM,
          "HOVER": HOVER, "PRESSED": PRESSED, "SELECT_BG": SELECT_BG, "FIELD": "#FFFFFF", "FIELD_LINE": "#D9DADE",
-         "SCROLL": "#CDCED2", "SCROLL_HOVER": "#AEB0B5", "WARN_BG": "#FDEBEC", "WARN_LINE": "#F5C9CB"}
+         "SCROLL": "#CDCED2", "SCROLL_HOVER": "#AEB0B5", "WARN_BG": "#FDEBEC", "WARN_LINE": "#F5C9CB",
+         # 층 나누기: 맨 위 탭 줄은 진하게, 패널 바탕은 옅은 회색, 그 위에 흰 카드
+         "TITLEBAR": "#E9EAED", "PANEL": "#F6F7F9", "CARD": "#FFFFFF", "CARD_LINE": "#E3E4E8", "SHADE": "rgba(0,0,0,0.07)"}
 DARK = {"BG": "#1F2023", "BAR": "#26272B", "BAR_LINE": "#35363B", "CANVAS": "#141517", "TEXT": "#E6E6E8",
         "TEXT_DIM": "#8E9095", "HOVER": "#2E2F33", "PRESSED": "#393A3F", "SELECT_BG": "#3A2426", "FIELD": "#2A2B2F",
-        "FIELD_LINE": "#45464C", "SCROLL": "#4A4B51", "SCROLL_HOVER": "#62636A", "WARN_BG": "#3A2426", "WARN_LINE": "#5A3033"}
+        "FIELD_LINE": "#45464C", "SCROLL": "#4A4B51", "SCROLL_HOVER": "#62636A", "WARN_BG": "#3A2426", "WARN_LINE": "#5A3033",
+        "TITLEBAR": "#17181A", "PANEL": "#1B1C1F", "CARD": "#25262A", "CARD_LINE": "#34353A", "SHADE": "rgba(0,0,0,0.35)"}
 
 CUR: dict = dict(LIGHT)  # 지금 테마. 아이콘이 그릴 때 여기 색을 쓴다(qss() 가 바꿈)
 
@@ -79,21 +82,29 @@ def qss(dark: bool = False) -> str:
     return f"""
     * {{ font-family: "{c['FONT']}"; font-size: 9pt; color: {c['TEXT']}; }}
     QMainWindow, QDialog, QWidget#central {{ background: {c['BG']}; }}
-    QWidget#titlebar {{ background: {c['BAR']}; border-bottom: 1px solid {c['BAR_LINE']}; }}
-    QWidget#ribbon {{ background: {c['BG']}; border-bottom: 1px solid {c['BAR_LINE']}; }}
+    QWidget#titlebar {{ background: {c['TITLEBAR']}; border-bottom: 1px solid {c['BAR_LINE']}; }}
+    QWidget#ribbon {{ background: {c['BG']}; }}
+    QStackedWidget#ribbonrow {{ background: {c['BAR']}; border-top: 1px solid {c['BAR_LINE']}; border-bottom: 1px solid {c['BAR_LINE']}; }}
+    QWidget#ribbonshadow {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 {c['SHADE']}, stop:1 rgba(0,0,0,0)); }}
     QWidget#ribbonbar {{ background: {c['BG']}; }}
     QWidget#statusbar {{ background: {c['BAR']}; border-top: 1px solid {c['BAR_LINE']}; }}
     QWidget#statusbar QLabel {{ color: {c['TEXT_DIM']}; }}
     QWidget#navstrip, QWidget#rightstrip {{ background: {c['BAR']}; }}
     QWidget#navstrip {{ border-right: 1px solid {c['BAR_LINE']}; }}
     QWidget#rightstrip {{ border-left: 1px solid {c['BAR_LINE']}; }}
-    QWidget#sidepanel {{ background: {c['BG']}; border-right: 1px solid {c['BAR_LINE']}; }}
-    QWidget#proppanel {{ background: {c['BG']}; border-left: 1px solid {c['BAR_LINE']}; }}
+    QWidget#sidepanel {{ background: {c['PANEL']}; border-right: 1px solid {c['BAR_LINE']}; }}
+    QWidget#sidepanel QListWidget, QWidget#sidepanel QTreeWidget, QWidget#sidepanel QHeaderView,
+    QWidget#sidepanel QHeaderView::section {{ background: {c['PANEL']}; }}
+    QWidget#proppanel {{ background: {c['PANEL']}; border-left: 1px solid {c['BAR_LINE']}; }}
+    QFrame#group {{ background: {c['CARD']}; border: 1px solid {c['CARD_LINE']}; border-radius: 8px; }}
+    QFrame#group QLabel {{ background: transparent; }}
+    QLabel#grouptitle {{ font-weight: bold; color: {c['TEXT']}; padding: 0 0 2px 0; }}
     QWidget#printleft {{ background: {c['CANVAS']}; }}
-    QWidget#printright {{ background: {c['BG']}; border-left: 1px solid {c['BAR_LINE']}; }}
+    QWidget#printright {{ background: {c['PANEL']}; border-left: 1px solid {c['BAR_LINE']}; }}
 
     /* 패널 머리(썸네일·북마크·주석…): 높이·글자·밑줄을 한 모양으로 */
     QWidget#panelhead {{ background: {c['BG']}; border-bottom: 1px solid {c['BAR_LINE']}; }}
+    QWidget#panelshadow {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 {c['SHADE']}, stop:1 rgba(0,0,0,0)); }}
     QLabel#paneltitle {{ font-weight: bold; padding: 0; }}
     QLabel#section {{ color: {c['TEXT_DIM']}; font-size: 8pt; padding: 8px 0 2px 0; }}
 

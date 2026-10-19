@@ -95,11 +95,17 @@ class PageItem(QGraphicsItem):
         self.w, self.h = w, h
 
     def boundingRect(self) -> QRectF:
+        # 그림자까지 넣어야 다시 그릴 때 그림자 자리가 지워지지 않는다(쪽 자리는 page_rect)
+        return QRectF(-6, -4, self.w + 13, self.h + 14)
+
+    def page_rect(self) -> QRectF:
         return QRectF(0, 0, self.w, self.h)
 
     def paint(self, p: QPainter, opt: QStyleOptionGraphicsItem, widget: QWidget | None = None):
-        r = self.boundingRect()
-        p.fillRect(r.adjusted(2, 3, 2, 3), QColor(0, 0, 0, 25))  # 그림자
+        r = self.page_rect()
+        # 부드러운 그림자: 바깥으로 갈수록 옅은 테를 겹쳐 종이가 바탕에서 떠 보이게(한 겹 그림자는 밋밋했다)
+        for k, a in ((6, 6), (4, 10), (2, 16), (1, 22)):
+            p.fillRect(r.adjusted(-k + 1, -k + 3, k + 1, k + 3), QColor(0, 0, 0, a))
         p.fillRect(r, Qt.GlobalColor.white)
         if self.pm is not None:
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, self.pm_zoom != self.view.zoom)
@@ -389,7 +395,7 @@ class PageView(QGraphicsView):
         for it in self.items:
             if not it.isVisible():
                 continue
-            r = it.sceneBoundingRect()
+            r = it.mapRectToScene(it.page_rect())
             if r.top() <= mid <= r.bottom():
                 best = it.index
                 break
@@ -428,7 +434,7 @@ class PageView(QGraphicsView):
     # ── 좌표 ──────────────────────────────────────────────────
     def page_at(self, scene_pt: QPointF) -> int:
         for it in self.items:
-            if it.isVisible() and it.sceneBoundingRect().contains(scene_pt):
+            if it.isVisible() and it.mapRectToScene(it.page_rect()).contains(scene_pt):
                 return it.index
         return -1
 

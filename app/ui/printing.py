@@ -247,14 +247,16 @@ class PrintDialog(QDialog):
         root.addWidget(left, 1)
 
         # 오른쪽: 설정
-        right = QWidget(); right.setObjectName("printright"); right.setFixedWidth(330)
+        right = QWidget(); right.setObjectName("printright"); right.setFixedWidth(340)
         right.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        rl = QVBoxLayout(right); rl.setContentsMargins(20, 18, 20, 16); rl.setSpacing(6)
-        f = QFormLayout(); f.setHorizontalSpacing(12); f.setVerticalSpacing(8); f.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-        rl.addLayout(f)
+        rl = QVBoxLayout(right); rl.setContentsMargins(14, 14, 14, 14); rl.setSpacing(10)
+        from .sidebar import group_card
 
-        def section(text):
-            s = QLabel(text); s.setObjectName("section"); f.addRow(s)
+        def section(text):  # 옅은 회색 바탕 위 흰 카드 하나씩
+            box, form = group_card(text); rl.addWidget(box)
+            return form
+
+        f = section("프린터")
 
         self.printer = QComboBox()
         names = QPrinterInfo.availablePrinterNames()
@@ -262,9 +264,9 @@ class PrintDialog(QDialog):
         want = r.get("printer") if r.get("printer") in names else QPrinterInfo.defaultPrinterName()
         if want in names:
             self.printer.setCurrentText(want)
-        f.addRow("프린터", self.printer)
+        f.addRow(self.printer)
 
-        section("쪽")
+        f = section("쪽")
         self.range = PageRangeEdit(len(doc), current); f.addRow(self.range)
         self.subset = QComboBox()
         for k, label in SUBSETS:
@@ -272,7 +274,7 @@ class PrintDialog(QDialog):
         f.addRow("고르기", self.subset)
         self.reverse = QCheckBox("마지막 쪽부터"); f.addRow("", self.reverse)
 
-        section("용지·크기")
+        f = section("용지·크기")
         self.paper = QComboBox(); f.addRow("용지", self.paper)
         self.fit = QComboBox()
         for k, label in FITS:
@@ -285,7 +287,7 @@ class PrintDialog(QDialog):
         self.orient.setCurrentIndex(max(0, self.orient.findData(r.get("orient", "auto"))))
         f.addRow("방향", self.orient)
 
-        section("매수·색")
+        f = section("매수·색")
         crow = QWidget(); ch = QHBoxLayout(crow); ch.setContentsMargins(0, 0, 0, 0); ch.setSpacing(10)
         self.copies = QSpinBox(); self.copies.setRange(1, 999); self.copies.setFixedWidth(80)
         self.collate = QCheckBox("한 부씩"); self.collate.setChecked(True)

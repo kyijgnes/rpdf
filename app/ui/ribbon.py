@@ -168,7 +168,7 @@ class Ribbon(QWidget):
         tl.addWidget(self.search)
         lay.addWidget(top)
         # 아랫줄
-        self.stack = QStackedWidget(); self.stack.setFixedHeight(38)
+        self.stack = QStackedWidget(); self.stack.setObjectName("ribbonrow"); self.stack.setFixedHeight(40)
         self.pages: dict[str, QWidget] = {}
         self.buttons: dict[str, list[QToolButton]] = {}
         self.toolgroup: dict[str, list[QToolButton]] = {}
@@ -176,6 +176,9 @@ class Ribbon(QWidget):
             w = self._build(items)
             self.pages[key] = w; self.stack.addWidget(w)
         lay.addWidget(self.stack)
+        # 리본 아래 옅은 그림자: 리본과 문서 자리가 한 판으로 붙어 밋밋하던 것을 층으로 나눈다
+        shade = QWidget(); shade.setObjectName("ribbonshadow"); shade.setFixedHeight(4)
+        shade.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True); lay.addWidget(shade)
         self._widths: dict[str, tuple[int, int, list[QToolButton]]] = {}
         self.current_tab = "home"
         self.set_tab("home")

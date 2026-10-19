@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
-                               QSlider, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
+                               QScrollArea, QSlider, QVBoxLayout, QWidget)
 
 from ..engine import annots as A
 from .dialogs import ColorButton
-from .sidebar import panel_head
+from .sidebar import group_card, panel_head
 
 
 class PropsPanel(QWidget):
@@ -18,37 +18,37 @@ class PropsPanel(QWidget):
     def __init__(self, props: dict, parent=None):
         super().__init__(parent)
         self.setObjectName("proppanel")
-        self.setFixedWidth(232)
+        self.setFixedWidth(260)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.props = props
         outer = QVBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
         outer.addWidget(panel_head("속성"))
-        lay = QVBoxLayout(); lay.setContentsMargins(12, 8, 12, 10); lay.setSpacing(6); outer.addLayout(lay)
+        # 옅은 회색 바탕 위에 쓰임새별 흰 카드. 창이 낮으면 스크롤
+        body = QWidget(); body.setObjectName("propbody")
+        lay = QVBoxLayout(body); lay.setContentsMargins(8, 10, 8, 12); lay.setSpacing(10)
+        scroll = QScrollArea(); scroll.setWidget(body); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea, QWidget#propbody { background: transparent; }")
+        scroll.viewport().setAutoFillBackground(False)
+        outer.addWidget(scroll, 1)
         self.kind = QLabel(""); self.kind.setObjectName("dim"); lay.addWidget(self.kind)
-        # 열한 줄이 한 덩어리로 늘어서 있던 것을 쓰임새끼리 묶는다
-        f = QFormLayout(); f.setLabelAlignment(Qt.AlignmentFlag.AlignLeft); f.setHorizontalSpacing(12); f.setVerticalSpacing(6)
-        lay.addLayout(f)
 
-        def section(text):
-            s = QLabel(text); s.setObjectName("section"); f.addRow(s)
-
-        section("선·채움")
+        box, f = group_card("선·채움"); lay.addWidget(box)
         self.stroke = ColorButton(props["stroke"], allow_none=True); f.addRow("선·글자 색", self.stroke)
         self.fill = ColorButton(props["fill"], allow_none=True); f.addRow("채움색", self.fill)
         self.width = QDoubleSpinBox(); self.width.setRange(0, 30); self.width.setValue(props["width"]); f.addRow("두께", self.width)
         self.opacity = QSlider(Qt.Orientation.Horizontal); self.opacity.setRange(5, 100); self.opacity.setValue(int(props["opacity"] * 100))
         f.addRow("불투명도", self.opacity)
-        section("강조·글자")
+        box, f = group_card("강조·글자"); lay.addWidget(box)
         self.hl = ColorButton(props["hl_color"]); f.addRow("강조색", self.hl)
         self.fontsize = QDoubleSpinBox(); self.fontsize.setRange(4, 200); self.fontsize.setValue(props["fontsize"]); f.addRow("글자 크기", self.fontsize)
-        section("연필")
+        box, f = group_card("연필"); lay.addWidget(box)
         self.ink_color = ColorButton(props["ink_color"]); f.addRow("색", self.ink_color)
         self.ink_width = QDoubleSpinBox(); self.ink_width.setRange(0.5, 30); self.ink_width.setValue(props["ink_width"]); f.addRow("두께", self.ink_width)
-        section("스탬프·측정")
+        box, f = group_card("스탬프·측정"); lay.addWidget(box)
         self.stamp_text = QComboBox(); self.stamp_text.setEditable(True); self.stamp_text.addItems(A.STAMP_TEXTS)
         self.stamp_text.setCurrentText(props["stamp_text"]); f.addRow("스탬프 글자", self.stamp_text)
         self.unit = QComboBox(); self.unit.addItems(["cm", "mm", "in", "pt"]); self.unit.setCurrentText(props["measure_unit"]); f.addRow("측정 단위", self.unit)
-        lay.addSpacing(6)
         self.content = QPlainTextEdit(); self.content.setPlaceholderText("주석 내용"); self.content.setMaximumHeight(80); lay.addWidget(self.content)
         self.apply_btn = QPushButton("고른 주석에 적용"); self.apply_btn.setObjectName("accent")
         self.apply_btn.clicked.connect(self._apply); lay.addWidget(self.apply_btn)

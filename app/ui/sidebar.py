@@ -26,6 +26,18 @@ def panel_head(title: str, buttons=()) -> QWidget:
     return w
 
 
+def group_card(title: str):
+    """옅은 회색 패널 위의 흰 카드 하나: 제목 + 칸 목록. (카드, 칸 목록 QFormLayout) 을 돌려준다."""
+    from PySide6.QtWidgets import QFormLayout, QFrame
+    box = QFrame(); box.setObjectName("group")
+    v = QVBoxLayout(box); v.setContentsMargins(10, 9, 10, 10); v.setSpacing(7)
+    t = QLabel(title); t.setObjectName("grouptitle"); v.addWidget(t)
+    f = QFormLayout(); f.setHorizontalSpacing(10); f.setVerticalSpacing(7); f.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+    f.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+    v.addLayout(f)
+    return box, f
+
+
 def _tidy_tree(tree: QTreeWidget, stretch: int):
     """좁은 패널에서 가로 스크롤이 생기지 않게: 한 칸은 늘이고 나머지는 내용만큼, 넘치면 … 로 줄임."""
     h = tree.header()
