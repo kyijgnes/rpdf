@@ -2,6 +2,8 @@
 build/
 dist/
 *.spec
+release/
+installer/defs.iss
 __pycache__/
 *.pyc
 .pytest_cache/

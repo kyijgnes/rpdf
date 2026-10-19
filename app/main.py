@@ -7,6 +7,10 @@ import sys
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    from . import updater
+    updater.hold_running_mutex()   # 설치·제거 프로그램이 앱이 켜져 있는지 이것으로 본다
+    after_update = updater.AFTER_FLAG in argv
+    argv = [a for a in argv if a != updater.AFTER_FLAG]
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QFont
@@ -34,6 +38,10 @@ def main(argv: list[str] | None = None) -> int:
     for p in argv:
         if os.path.exists(p):
             w.open_path(p)
+    from PySide6.QtCore import QTimer
+    from .ui.update import after_update as reopen
+    reopen(w, after_update)
+    QTimer.singleShot(3000, w.updates.auto_check)   # 새 버전이 있으면 상태줄에 단추(설치본만)
     # 개발 확인용: PDFAPP_SHOT=그림경로[;탭키[;side|props|organize]] 이면 3초 뒤 창을 찍고 끝낸다
     shot = os.environ.get("PDFAPP_SHOT")
     if shot:

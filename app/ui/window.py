@@ -31,6 +31,7 @@ from .props import PropsPanel
 from .ribbon import LABELS, TOOL_KEYS, Ribbon
 from .sidebar import AnnotPanel, AttachmentPanel, BookmarkPanel, FieldPanel, LayerPanel, SearchPanel, ThumbnailPanel
 from .start import StartPage
+from .update import UpdateUI
 from .viewer import PageView
 
 from ..appinfo import APP_ID, APP_NAME, ICON, OLD_APP_IDS  # noqa: E402
@@ -221,6 +222,7 @@ class MainWindow(QMainWindow):
         tl.addWidget(self.doctabs)
         addb = QToolButton(); addb.setObjectName("quick"); addb.setIcon(icons.icon("add", 16)); addb.setToolTip("열기"); addb.clicked.connect(self.open_dialog)
         tl.addWidget(addb); tl.addStretch()
+        self.updates = UpdateUI(self); tl.addWidget(self.updates.bar)  # [새 버전 x 설치]·「설치 끝」. 시작 화면에서도 보이는 줄
         root.addWidget(tabrow)
         # 리본
         self.ribbon = Ribbon()
@@ -993,6 +995,7 @@ class MainWindow(QMainWindow):
         m.addSeparator()
         a = m.addAction(icons.icon("info"), "파일 속성\tCtrl+D", lambda: self.on_action("properties")); a.setEnabled(bool(t))
         m.addAction(icons.icon("settings"), "환경 설정\tCtrl+K", lambda: self.on_action("preferences"))
+        m.addAction(icons.icon("update"), self.updates.menu_label(), self.updates.check_now)
         m.addSeparator()
         a = m.addAction("닫기\tCtrl+W", lambda: self.on_action("close")); a.setEnabled(bool(t))
         m.addAction("끝내기", self.close)

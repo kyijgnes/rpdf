@@ -1,6 +1,7 @@
 """PyInstaller onedir 빌드. `python build.py` → dist\\<APP_ID>\\<APP_ID>.exe (이름은 app/appinfo.py)
 
 빌드는 한 번에 한 세션만(공용 규칙). 다른 빌드가 돌고 있으면 기다린다.
+설치 프로그램을 만들고 GitHub 에 올리는 것은 release.py 가 한다(이 파일을 HEAD 사본에서 부른다).
 """
 from __future__ import annotations
 
@@ -30,6 +31,11 @@ def main() -> int:
     # 앱이 안 쓰는데 훅이 끌어오는 무거운 패키지(첫 빌드 783MB 가운데 torch 366MB·scipy 71MB 등)
     for m in EXCLUDE:
         cmd[-1:-1] = ["--exclude-module", m]
+    # 앱 아이콘(있으면): exe·바로 가기 아이콘으로 쓰고, 창 아이콘용으로 assets\ 를 통째로 _internal\assets 에 싣는다
+    if os.path.exists(os.path.join("assets", "app.ico")):
+        cmd[-1:-1] = ["--icon", os.path.join("assets", "app.ico")]
+    if os.path.isdir("assets"):
+        cmd[-1:-1] = ["--add-data", "assets;assets"]
     with open("run.py", "w", encoding="utf-8") as f:
         f.write("from app.main import main\nimport sys\nsys.exit(main())\n")
     r = subprocess.call(cmd)
