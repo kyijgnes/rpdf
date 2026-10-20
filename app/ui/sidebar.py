@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import fitz
-from PySide6.QtCore import QRectF, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton,
@@ -16,9 +16,9 @@ from . import icons, theme
 
 def panel_head(title: str, buttons=()) -> QWidget:
     """패널 머리: 제목 + 오른쪽 작은 단추들. 패널마다 높이·여백·밑줄이 달랐던 것을 한 모양으로."""
-    w = QWidget(); w.setObjectName("panelhead"); w.setFixedHeight(36)
+    w = QWidget(); w.setObjectName("panelhead"); w.setFixedHeight(32)
     w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-    hl = QHBoxLayout(w); hl.setContentsMargins(12, 0, 6, 0); hl.setSpacing(2)
+    hl = QHBoxLayout(w); hl.setContentsMargins(10, 0, 4, 0); hl.setSpacing(0)
     t = QLabel(title); t.setObjectName("paneltitle"); hl.addWidget(t); hl.addStretch()
     for name, tip, fn in buttons:
         b = QToolButton(); b.setObjectName("quick"); b.setIcon(icons.icon(name, 16)); b.setToolTip(tip)
@@ -30,9 +30,9 @@ def group_card(title: str):
     """옅은 회색 패널 위의 흰 카드 하나: 제목 + 칸 목록. (카드, 칸 목록 QFormLayout) 을 돌려준다."""
     from PySide6.QtWidgets import QFormLayout, QFrame
     box = QFrame(); box.setObjectName("group")
-    v = QVBoxLayout(box); v.setContentsMargins(10, 9, 10, 10); v.setSpacing(7)
+    v = QVBoxLayout(box); v.setContentsMargins(10, 7, 10, 8); v.setSpacing(5)
     t = QLabel(title); t.setObjectName("grouptitle"); v.addWidget(t)
-    f = QFormLayout(); f.setHorizontalSpacing(10); f.setVerticalSpacing(7); f.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+    f = QFormLayout(); f.setHorizontalSpacing(8); f.setVerticalSpacing(5); f.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
     f.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
     v.addLayout(f)
     return box, f
@@ -91,7 +91,7 @@ class ThumbDelegate(QStyledItemDelegate):
             p.drawRoundedRect(QRectF(r).adjusted(2, 1, -2, -1), 6, 6)
         pm = idx.data(self.PIX)
         label = idx.data(Qt.ItemDataRole.DisplayRole) or ""
-        top = r.top() + 6
+        top = r.top() + 4
         if isinstance(pm, QPixmap) and not pm.isNull():
             w = pm.width() / pm.devicePixelRatio(); h = pm.height() / pm.devicePixelRatio()
             x = r.left() + (r.width() - w) / 2
@@ -103,7 +103,7 @@ class ThumbDelegate(QStyledItemDelegate):
             p.drawRect(QRectF(x, top, w, h))
         f = p.font(); f.setBold(selected); p.setFont(f)
         p.setPen(QColor(theme.ACCENT) if selected else QColor(c["TEXT_DIM"]))
-        p.drawText(QRectF(r.left(), r.bottom() - 22, r.width(), 20), Qt.AlignmentFlag.AlignCenter, str(label))
+        p.drawText(QRectF(r.left(), r.bottom() - 19, r.width(), 18), Qt.AlignmentFlag.AlignCenter, str(label))
         p.restore()
 
     def sizeHint(self, opt, idx):
@@ -148,7 +148,7 @@ class ThumbnailPanel(QWidget):
     reordered = Signal(list)       # 새 순서
     pagesAction = Signal(str, list)  # 'rotate_left' 'rotate_right' 'delete' 'extract' 'insert_blank' 'insert_pdf' 'duplicate'
 
-    def __init__(self, doc: Document, thumb_w: int = 120, parent=None):
+    def __init__(self, doc: Document, thumb_w: int = 150, parent=None):
         super().__init__(parent)
         self.doc = doc
         self.thumb_w = thumb_w
@@ -157,12 +157,13 @@ class ThumbnailPanel(QWidget):
         lay.setSpacing(0)
         lay.addWidget(panel_head("썸네일", (("zoomout", "작게", lambda: self.set_width(max(70, self.thumb_w - 30))),
                                             ("zoomin", "크게", lambda: self.set_width(min(260, self.thumb_w + 30))))))
-        self.list = PageGrid(8)
+        self.list = PageGrid(3)
         self.list.itemClicked.connect(lambda it: self.pageClicked.emit(it.data(Qt.ItemDataRole.UserRole)))
         self.list.reordered.connect(self.reordered)
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._menu)
         lay.addWidget(self.list)
+        self.list.viewport().installEventFilter(self)
         self.worker: ThumbWorker | None = None
         self.reload()
 
@@ -186,12 +187,28 @@ class ThumbnailPanel(QWidget):
             it = QListWidgetItem(labels[i])
             it.setData(Qt.ItemDataRole.UserRole, i)
             it.setData(ThumbDelegate.PIX, pm)
-            it.setSizeHint(QSize(self.thumb_w + 16, h + 34))
+            it.setSizeHint(QSize(self.thumb_w + 12, h + 27))
             self.list.addItem(it)
+        self._fit_items()
         self.worker = ThumbWorker(self.doc, self.thumb_w, self.devicePixelRatioF())
         self.worker.todo = list(range(self.doc.page_count))
         self.worker.done.connect(self._thumb)
         self.worker.start()
+
+    def _fit_items(self):
+        """한 줄에 한 장만 들어가면 칸을 패널 폭만큼 넓혀 썸네일이 가운데 오게(왼쪽에 붙고 오른쪽이 비던 것)."""
+        each = self.thumb_w + 12
+        room = self.list.viewport().width() - 2 * self.list.spacing() - 1
+        w = room if each <= room < 2 * each + 2 * self.list.spacing() else each
+        for k in range(self.list.count()):
+            it = self.list.item(k)
+            if it.sizeHint().width() != w:
+                it.setSizeHint(QSize(w, it.sizeHint().height()))
+
+    def eventFilter(self, obj, e):
+        if obj is self.list.viewport() and e.type() == QEvent.Type.Resize:
+            QTimer.singleShot(0, self._fit_items)
+        return super().eventFilter(obj, e)
 
     def refresh_pages(self, pages: list[int] | None):
         if self.worker and self.worker.isRunning():
@@ -347,7 +364,7 @@ class AnnotPanel(QWidget):
         lay = QVBoxLayout(self); lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(0)
         lay.addWidget(panel_head("주석", tuple((name, tip, lambda _=False, k=key: self._action(k)) for name, tip, key in (
             ("import", "주석 가져오기", "import"), ("export", "주석 내보내기", "export"), ("delete", "모두 삭제", "delete_all")))))
-        box = QWidget(); bl = QVBoxLayout(box); bl.setContentsMargins(8, 8, 8, 6)
+        box = QWidget(); bl = QVBoxLayout(box); bl.setContentsMargins(8, 6, 8, 6)
         self.filter = QComboBox(); self.filter.addItems(["전체"] + sorted(set(A.KIND_NAMES.values())))
         self.filter.currentIndexChanged.connect(self.reload)
         bl.addWidget(self.filter); lay.addWidget(box)
@@ -470,22 +487,20 @@ class SearchPanel(QWidget):
         self.current = -1
         outer = QVBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
         outer.addWidget(panel_head("검색"))
-        lay = QVBoxLayout(); lay.setContentsMargins(10, 10, 10, 8); lay.setSpacing(8); outer.addLayout(lay)
+        lay = QVBoxLayout(); lay.setContentsMargins(8, 8, 8, 6); lay.setSpacing(6); outer.addLayout(lay)
         row = QHBoxLayout()
         self.edit = QLineEdit(); self.edit.setPlaceholderText("찾을 글자"); self.edit.returnPressed.connect(self.run)
         row.addWidget(self.edit)
         b = QToolButton(); b.setObjectName("quick"); b.setIcon(icons.icon("search", 16)); b.clicked.connect(self.run); row.addWidget(b)
+        bp = QToolButton(); bp.setObjectName("quick"); bp.setIcon(icons.icon("up", 16)); bp.clicked.connect(lambda: self.step(-1))
+        bn = QToolButton(); bn.setObjectName("quick"); bn.setIcon(icons.icon("down", 16)); bn.clicked.connect(lambda: self.step(1))
+        row.setSpacing(0); row.addSpacing(4); row.addWidget(bp); row.addWidget(bn)
         lay.addLayout(row)
         opts = QHBoxLayout()
         self.case = QCheckBox("대소문자"); self.whole = QCheckBox("낱말 전체")
-        opts.addWidget(self.case); opts.addWidget(self.whole); opts.addStretch()
-        lay.addLayout(opts)
-        nav = QHBoxLayout()
         self.count = QLabel(""); self.count.setObjectName("dim")
-        bp = QToolButton(); bp.setObjectName("quick"); bp.setIcon(icons.icon("up", 16)); bp.clicked.connect(lambda: self.step(-1))
-        bn = QToolButton(); bn.setObjectName("quick"); bn.setIcon(icons.icon("down", 16)); bn.clicked.connect(lambda: self.step(1))
-        nav.addWidget(self.count); nav.addStretch(); nav.addWidget(bp); nav.addWidget(bn)
-        lay.addLayout(nav)
+        opts.addWidget(self.case); opts.addWidget(self.whole); opts.addStretch(); opts.addWidget(self.count)
+        lay.addLayout(opts)
         # 바꾸기
         rrow = QHBoxLayout()
         self.repl = QLineEdit(); self.repl.setPlaceholderText("바꿀 글자")

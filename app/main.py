@@ -31,7 +31,8 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(ORG)
     app.setApplicationVersion(VERSION)
-    app.setFont(QFont("Malgun Gothic", 9))
+    from .ui import theme
+    f = QFont(theme.FONT); f.setPointSizeF(theme.FONT_PT); app.setFont(f)
     from .ui.window import MainWindow
     w = MainWindow()
     w.show()

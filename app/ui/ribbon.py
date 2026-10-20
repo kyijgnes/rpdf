@@ -5,11 +5,11 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QFont, QFontMetrics
 from PySide6.QtWidgets import (QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit, QMenu, QSizePolicy,
                                QSpinBox, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from . import icons
+from . import icons, theme
 
 # (key, icon, label, kind, menu_items)  menu_items: [(key, label)] 또는 None. label 이 "|" 면 구분선.
 SEP = ("|",)
@@ -161,6 +161,8 @@ class Ribbon(QWidget):
         for key, label, _ in TABS:
             b = QToolButton(); b.setObjectName("ribbontab"); b.setText(label); b.setCheckable(True)
             b.clicked.connect(lambda _, k=key: self.set_tab(k)); grp.addButton(b); tl.addWidget(b); self.tabbtns[key] = b
+            bf = QFont(theme.FONT); bf.setPointSizeF(theme.FONT_PT); bf.setBold(True)  # 고른 탭이 굵어져도 폭이 그대로이게
+            b.setFixedWidth(QFontMetrics(bf).horizontalAdvance(label) + 24)
         tl.addStretch(1)
         self.search = QLineEdit(); self.search.setPlaceholderText("검색 (Ctrl+F)")
         self.search.setMinimumWidth(70); self.search.setMaximumWidth(150)  # 창이 좁으면 검색칸부터 줄인다(화면 반쪽 960px)
@@ -217,7 +219,7 @@ class Ribbon(QWidget):
             self._fit()
 
     def _build(self, items) -> QWidget:
-        w = QWidget(); hl = QHBoxLayout(w); hl.setContentsMargins(8, 3, 8, 5); hl.setSpacing(3)
+        w = QWidget(); hl = QHBoxLayout(w); hl.setContentsMargins(8, 3, 8, 4); hl.setSpacing(2)
         hl.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)  # 최소 폭은 _measure 가 정한다(아이콘만일 때 폭)
         hl.addStretch(1)
         for it in items:

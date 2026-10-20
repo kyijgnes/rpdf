@@ -13,20 +13,21 @@ BG = "#FFFFFF"
 BAR = "#F4F5F7"           # 리본 단추 줄·상태줄·세로 막대 바탕
 BAR_LINE = "#E3E3E6"
 CANVAS = "#EDEEF0"        # 문서 뒤 회색
-TEXT = "#222326"
-TEXT_DIM = "#8A8C91"
+TEXT = "#1B1C1F"
+TEXT_DIM = "#6F7177"
 HOVER = "#F0F0F2"
 PRESSED = "#E6E6E9"
 SELECT_BG = "#FDECEC"
 FONT = "Malgun Gothic"
+FONT_PT = 9.5           # 맑은 고딕 9pt 는 획이 가늘어 흐려 보였다. 굵기는 400·700 두 가지뿐이라 제목은 700(bold)
 
 LIGHT = {"BG": BG, "BAR": BAR, "BAR_LINE": BAR_LINE, "CANVAS": CANVAS, "TEXT": TEXT, "TEXT_DIM": TEXT_DIM,
          "HOVER": HOVER, "PRESSED": PRESSED, "SELECT_BG": SELECT_BG, "FIELD": "#FFFFFF", "FIELD_LINE": "#D9DADE",
          "SCROLL": "#CDCED2", "SCROLL_HOVER": "#AEB0B5", "WARN_BG": "#FDEBEC", "WARN_LINE": "#F5C9CB",
          # 층 나누기: 맨 위 탭 줄은 진하게, 패널 바탕은 옅은 회색, 그 위에 흰 카드
          "TITLEBAR": "#E9EAED", "PANEL": "#F6F7F9", "CARD": "#FFFFFF", "CARD_LINE": "#E3E4E8", "SHADE": "rgba(0,0,0,0.07)"}
-DARK = {"BG": "#1F2023", "BAR": "#26272B", "BAR_LINE": "#35363B", "CANVAS": "#141517", "TEXT": "#E6E6E8",
-        "TEXT_DIM": "#8E9095", "HOVER": "#2E2F33", "PRESSED": "#393A3F", "SELECT_BG": "#3A2426", "FIELD": "#2A2B2F",
+DARK = {"BG": "#1F2023", "BAR": "#26272B", "BAR_LINE": "#35363B", "CANVAS": "#141517", "TEXT": "#EDEDEF",
+        "TEXT_DIM": "#A3A5AB", "HOVER": "#2E2F33", "PRESSED": "#393A3F", "SELECT_BG": "#3A2426", "FIELD": "#2A2B2F",
         "FIELD_LINE": "#45464C", "SCROLL": "#4A4B51", "SCROLL_HOVER": "#62636A", "WARN_BG": "#3A2426", "WARN_LINE": "#5A3033",
         "TITLEBAR": "#17181A", "PANEL": "#1B1C1F", "CARD": "#25262A", "CARD_LINE": "#34353A", "SHADE": "rgba(0,0,0,0.35)"}
 
@@ -80,7 +81,7 @@ def qss(dark: bool = False) -> str:
         img = {}
     down, up, check, dot = (f'url("{img[k]}")' if k in img else "none" for k in ("down", "up", "check", "dot"))
     return f"""
-    * {{ font-family: "{c['FONT']}"; font-size: 9pt; color: {c['TEXT']}; }}
+    * {{ font-family: "{c['FONT']}"; font-size: {FONT_PT}pt; color: {c['TEXT']}; }}
     QMainWindow, QDialog, QWidget#central {{ background: {c['BG']}; }}
     QWidget#titlebar {{ background: {c['TITLEBAR']}; border-bottom: 1px solid {c['BAR_LINE']}; }}
     QWidget#ribbon {{ background: {c['BG']}; }}
@@ -98,7 +99,7 @@ def qss(dark: bool = False) -> str:
     QWidget#proppanel {{ background: {c['PANEL']}; border-left: 1px solid {c['BAR_LINE']}; }}
     QFrame#group {{ background: {c['CARD']}; border: 1px solid {c['CARD_LINE']}; border-radius: 8px; }}
     QFrame#group QLabel {{ background: transparent; }}
-    QLabel#grouptitle {{ font-weight: bold; color: {c['TEXT']}; padding: 0 0 2px 0; }}
+    QLabel#grouptitle {{ font-weight: bold; color: {c['TEXT']}; padding: 0; }}
     QWidget#printleft {{ background: {c['CANVAS']}; }}
     QWidget#printright {{ background: {c['PANEL']}; border-left: 1px solid {c['BAR_LINE']}; }}
 
@@ -106,19 +107,19 @@ def qss(dark: bool = False) -> str:
     QWidget#panelhead {{ background: {c['BG']}; border-bottom: 1px solid {c['BAR_LINE']}; }}
     QWidget#panelshadow {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 {c['SHADE']}, stop:1 rgba(0,0,0,0)); }}
     QLabel#paneltitle {{ font-weight: bold; padding: 0; }}
-    QLabel#section {{ color: {c['TEXT_DIM']}; font-size: 8pt; padding: 8px 0 2px 0; }}
+    QLabel#section {{ color: {c['TEXT_DIM']}; font-weight: bold; padding: 6px 0 2px 0; }}
 
-    /* 리본 탭: 고른 탭을 굵게 하면 글자 폭이 달라져 줄이 출렁인다. 색과 밑줄로만 */
+    /* 리본 탭: 고른 탭은 굵게. 폭은 ribbon.py 가 굵은 글자 폭으로 못박아 줄이 출렁이지 않는다 */
     QToolButton#ribbontab {{ background: transparent; border: none; border-bottom: 2px solid transparent;
-        padding: 7px 12px 5px 12px; color: {c['TEXT']}; }}
+        padding: 6px 11px 4px 11px; color: {c['TEXT']}; }}
     QToolButton#ribbontab:hover {{ color: {c['ACCENT']}; }}
-    QToolButton#ribbontab:checked {{ color: {c['ACCENT']}; border-bottom: 2px solid {c['ACCENT']}; }}
+    QToolButton#ribbontab:checked {{ color: {c['ACCENT']}; font-weight: bold; border-bottom: 2px solid {c['ACCENT']}; }}
     QToolButton#ribbontab:disabled {{ color: {c['TEXT_DIM']}; }}
-    QToolButton#filetab {{ background: transparent; border: none; padding: 7px 12px 5px 10px; }}
+    QToolButton#filetab {{ background: transparent; border: none; padding: 6px 11px 4px 10px; font-weight: bold; }}
     QToolButton#filetab:hover {{ color: {c['ACCENT']}; }}
 
     /* 리본 단추 */
-    QToolButton#rb {{ background: transparent; border: none; border-radius: 4px; padding: 4px 8px; }}
+    QToolButton#rb {{ background: transparent; border: none; border-radius: 4px; padding: 4px 7px; }}
     QToolButton#rb:hover {{ background: {c['HOVER']}; }}
     QToolButton#rb:pressed {{ background: {c['PRESSED']}; }}
     QToolButton#rb:checked {{ background: {c['SELECT_BG']}; color: {c['ACCENT']}; }}
@@ -147,16 +148,16 @@ def qss(dark: bool = False) -> str:
     /* 문서 탭 */
     QTabBar#doctabs::tab {{ background: transparent; border: none; border-top: 2px solid transparent;
         padding: 6px 10px 6px 12px; min-width: 120px; max-width: 220px; color: {c['TEXT_DIM']}; }}
-    QTabBar#doctabs::tab:selected {{ background: {c['BG']}; border-top: 2px solid {c['ACCENT']}; color: {c['TEXT']}; }}
+    QTabBar#doctabs::tab:selected {{ background: {c['BG']}; border-top: 2px solid {c['ACCENT']}; color: {c['TEXT']}; font-weight: bold; }}
     QTabBar#doctabs::tab:hover:!selected {{ background: {c['HOVER']}; }}
     QTabBar#doctabs::close-button {{ subcontrol-position: right; }}
 
     /* 단추·입력칸 */
-    QPushButton {{ background: {c['FIELD']}; border: 1px solid {c['FIELD_LINE']}; border-radius: 4px; padding: 5px 14px;
+    QPushButton {{ background: {c['FIELD']}; border: 1px solid {c['FIELD_LINE']}; border-radius: 4px; padding: 4px 12px;
         min-height: 16px; }}
     QPushButton:hover {{ background: {c['HOVER']}; }}
     QPushButton:pressed {{ background: {c['PRESSED']}; }}
-    QPushButton:default, QPushButton#accent {{ background: {c['ACCENT']}; color: white; border-color: {c['ACCENT']}; }}
+    QPushButton:default, QPushButton#accent {{ background: {c['ACCENT']}; color: white; border-color: {c['ACCENT']}; font-weight: bold; }}
     QPushButton:default:hover, QPushButton#accent:hover {{ background: {c['ACCENT_DARK']}; border-color: {c['ACCENT_DARK']}; }}
     QPushButton:disabled {{ color: {c['TEXT_DIM']}; }}
     QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit, QPlainTextEdit {{
@@ -212,11 +213,11 @@ def qss(dark: bool = False) -> str:
     QAbstractScrollArea::corner {{ background: transparent; }}
 
     /* 메뉴 */
-    QMenu {{ background: {c['BG']}; border: 1px solid {c['BAR_LINE']}; border-radius: 6px; padding: 5px; }}
-    QMenu::item {{ padding: 6px 28px 6px 12px; border-radius: 4px; }}
+    QMenu {{ background: {c['BG']}; border: 1px solid {c['BAR_LINE']}; border-radius: 6px; padding: 4px; }}
+    QMenu::item {{ padding: 5px 24px 5px 10px; border-radius: 4px; }}
     QMenu::item:selected {{ background: {c['HOVER']}; }}
     QMenu::item:disabled {{ color: {c['TEXT_DIM']}; }}
-    QMenu::separator {{ height: 1px; background: {c['BAR_LINE']}; margin: 5px 8px; }}
+    QMenu::separator {{ height: 1px; background: {c['BAR_LINE']}; margin: 4px 8px; }}
     QMenu::right-arrow {{ image: none; }}
 
     /* 그 밖 */
@@ -225,16 +226,16 @@ def qss(dark: bool = False) -> str:
     QSlider::handle:horizontal {{ width: 12px; height: 12px; margin: -5px 0; background: {c['ACCENT']}; border-radius: 6px; }}
     QSlider::handle:horizontal:hover {{ background: {c['ACCENT_DARK']}; }}
     QToolTip {{ background: {c['BG']}; color: {c['TEXT']}; border: 1px solid {c['BAR_LINE']}; padding: 4px 6px; }}
-    QGroupBox {{ border: 1px solid {c['BAR_LINE']}; border-radius: 6px; margin-top: 12px; padding: 10px 8px 6px 8px; }}
-    QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {c['TEXT_DIM']}; }}
-    QTabWidget::pane {{ border: 1px solid {c['BAR_LINE']}; border-radius: 6px; top: -1px; }}
+    QGroupBox {{ border: 1px solid {c['BAR_LINE']}; border-radius: 6px; margin-top: 10px; padding: 8px 8px 6px 8px; }}
+    QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {c['TEXT']}; font-weight: bold; }}
+    QTabWidget::pane {{ border: 1px solid {c['BAR_LINE']}; border-radius: 6px; top: -1px; padding: 2px; }}
     QTabWidget QTabBar::tab {{ background: transparent; border: none; border-bottom: 2px solid transparent;
         padding: 6px 12px; color: {c['TEXT_DIM']}; }}
     QTabWidget QTabBar::tab:selected {{ color: {c['ACCENT']}; border-bottom: 2px solid {c['ACCENT']}; }}
     QProgressBar {{ border: none; border-radius: 3px; background: {c['BAR_LINE']}; text-align: center; max-height: 6px; }}
     QProgressBar::chunk {{ background: {c['ACCENT']}; border-radius: 3px; }}
     QLabel#dim {{ color: {c['TEXT_DIM']}; }}
-    QLabel#warn {{ background: {c['WARN_BG']}; color: {c['ACCENT_DARK']}; padding: 6px 12px; border-bottom: 1px solid {c['WARN_LINE']}; }}
+    QLabel#warn {{ background: {c['WARN_BG']}; color: {c['ACCENT_DARK']}; font-weight: bold; padding: 5px 12px; border-bottom: 1px solid {c['WARN_LINE']}; }}
     QFrame#card {{ background: {c['BG']}; border: 1px solid {c['BAR_LINE']}; border-radius: 6px; }}
     QFrame#card:hover {{ border-color: {c['ACCENT']}; }}
     """
