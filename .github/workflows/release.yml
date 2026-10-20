@@ -21,9 +21,9 @@ jobs:
       PYTHONIOENCODING: "utf-8"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -55,7 +55,7 @@ jobs:
       - name: 설치 프로그램(Inno Setup)
         run: python make_setup.py --out release
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: setup
           path: release/*
@@ -64,7 +64,7 @@ jobs:
         # ★ 릴리스 노트(본문)를 쓰지 않는다. 제목(태그)과 받을 파일만 둔다(쿨다운과 같은 규칙).
         #   body / body_path 를 넣지 말 것, generate_release_notes 도 켜지 말 것(자동 생성도 노트다).
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             release/PDFEditor-setup-${{ steps.ver.outputs.version }}.exe
