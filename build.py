@@ -28,8 +28,7 @@ def write_version_file() -> str:
     t = ", ".join(str(int(n)) for n in nums)
     strings = {"CompanyName": ORG, "FileDescription": APP_NAME, "FileVersion": VERSION, "InternalName": APP_ID,
                "OriginalFilename": APP_ID + ".exe", "ProductName": APP_NAME, "ProductVersion": VERSION}
-    items = ",
-".join(f"          StringStruct({k!r}, {v!r})" for k, v in strings.items())
+    items = ",\n".join(f"          StringStruct({k!r}, {v!r})" for k, v in strings.items())
     text = f"""VSVersionInfo(
   ffi=FixedFileInfo(filevers=({t}), prodvers=({t}), mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
   kids=[
