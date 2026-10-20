@@ -337,7 +337,7 @@ class MainWindow(QMainWindow):
         sl.addStretch()
         zo = QToolButton(); zo.setObjectName("quick"); zo.setIcon(icons.icon("zoomout", 14)); zo.clicked.connect(lambda: self.on_action("zoomout")); sl.addWidget(zo)
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal); self.zoom_slider.setRange(10, 800); self.zoom_slider.setFixedWidth(110)
-        self.zoom_slider.sliderMoved.connect(lambda v: self.cur() and self.cur().viewer.set_zoom(v / 100)); sl.addWidget(self.zoom_slider)
+        self.zoom_slider.sliderMoved.connect(self._zoom_slider); sl.addWidget(self.zoom_slider)
         zi = QToolButton(); zi.setObjectName("quick"); zi.setIcon(icons.icon("zoomin", 14)); zi.clicked.connect(lambda: self.on_action("zoomin")); sl.addWidget(zi)
         self.zoom_box = QComboBox(); self.zoom_box.setEditable(True); self.zoom_box.setFixedWidth(92)
         self.zoom_box.addItems(["50%", "75%", "100%", "125%", "150%", "200%", "300%", "400%", "창 너비", "창 크기", "실제 크기"])
@@ -402,7 +402,7 @@ class MainWindow(QMainWindow):
     def add_doc(self, doc: Document):
         t = DocTab(doc, self)
         t.viewer.pageChanged.connect(lambda i: self._sync_status(t))
-        t.viewer.zoomChanged.connect(lambda z: self._sync_status(t))
+        t.viewer.zoomChanged.connect(lambda z: (self._sync_status(t), self._remember_zoom(t)))
         t.viewer.status.connect(self.say)
         t.viewer.requestDialog.connect(lambda kind, data, tab=t: self.on_request(tab, kind, data))
         t.viewer.toolDone.connect(self._tool_done)
@@ -414,8 +414,11 @@ class MainWindow(QMainWindow):
         self.doctabs.setTabToolTip(i, doc.path or "")
         pl = self.prefs.get("default_layout", "continuous")
         t.viewer.layout_mode = pl
-        zm = self.prefs.get("default_zoom", "fit_width")
-        t.viewer.zoom_mode = zm if zm != "last" else "fit_width"
+        zm = self.prefs.get("default_zoom", "last")
+        last = self.settings.get("last_zoom") or {}
+        if zm == "last":   # 마지막으로 쓴 확대: 맞추기였으면 그 맞추기, 직접 고른 배율이면 그 배율
+            zm = last.get("mode", "fit_width")
+        t.viewer.zoom_mode = zm
         t.viewer.set_layout_mode(pl)
         t.viewer.props["author"] = self.prefs.get("author", "")
         t.viewer.props["measure_unit"] = self.prefs.get("unit", "cm")
@@ -423,7 +426,11 @@ class MainWindow(QMainWindow):
         t.viewer.setBackgroundBrush(QColor(theme.DARK["CANVAS"] if self.prefs.get("dark") else theme.CANVAS))
         self.doctabs.setCurrentIndex(i)
         self._tab_changed(i)
-        QTimer.singleShot(60, lambda: (t.viewer._apply_fit(), t.viewer.goto(0)))
+        def first_view():
+            if t.viewer.zoom_mode == "fixed":
+                t.viewer.set_zoom(float(last.get("zoom", 1.0)))
+            t.viewer._apply_fit(); t.viewer.goto(0)
+        QTimer.singleShot(60, first_view)
 
     def open_path(self, path: str, password: str | None = None):
         path = os.path.abspath(path)
@@ -514,6 +521,15 @@ class MainWindow(QMainWindow):
     def say(self, msg: str):
         self.msg_label.setText(msg); self.msg_label.setToolTip(msg)
         QTimer.singleShot(5000, lambda: self.msg_label.setText("") if self.msg_label.text() == msg else None)
+
+    def _zoom_slider(self, v: int):
+        t = self.cur()
+        if t:
+            t.viewer.zoom_mode = "fixed"; t.viewer.set_zoom(v / 100)
+
+    def _remember_zoom(self, t: DocTab):
+        if t is self.cur():   # 다음에 여는 문서가 따라갈 확대(환경 설정 「열 때 확대」가 마지막 확대일 때)
+            self.settings["last_zoom"] = {"mode": t.viewer.zoom_mode, "zoom": round(t.viewer.zoom, 4)}
 
     def _sync_status(self, t: DocTab):
         if t is not self.cur():
