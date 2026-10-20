@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 _version_info.txt
+
+# 알PDF 분석 원본(디컴파일·증거 원문). 공개 저장소라 요약 명세만 올린다
+참고/알PDF분석/원본/
