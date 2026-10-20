@@ -49,7 +49,7 @@ def main() -> int:
     for d in ("build", "dist"):
         shutil.rmtree(os.path.join(HERE, d), ignore_errors=True)
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--onedir", "--name", NAME,
-           "--collect-all", "pymupdf", "--collect-all", "fitz", "--hidden-import", "PySide6.QtPrintSupport",
+           "--collect-all", "pymupdf", "--collect-all", "fitz", "--hidden-import", "PySide6.QtPrintSupport", "--hidden-import", "PySide6.QtNetwork",
            "--hidden-import", "win32com.client", "--hidden-import", "docx", "--hidden-import", "openpyxl", "--hidden-import", "pptx",
            "--hidden-import", "pikepdf", "--hidden-import", "PIL",
            "run.py"]

@@ -202,10 +202,58 @@ class MainWindow(QMainWindow):
         self.resize(1360, 820)
         self.setWindowIcon(QIcon(ICON) if os.path.isfile(ICON) else icons.icon("thumbs", 32, theme.ACCENT))
         self.tabs: list[DocTab] = []
+        self._receiver = None   # 다른 데서 켠 RPDF 가 파일을 넘겨 오는 곳(single.Receiver)
         self._build()
         self.apply_theme()
         self._shortcuts()
         self.show_start()
+
+    def show_initial(self):
+        """켤 때 창 크기: 환경 설정 「열 때 창 크기」(마지막으로 닫은 크기 · 화면 가득 · 보통 크기)."""
+        how = self.prefs.get("window_size", "last")
+        geo = self.settings.get("window_geometry")
+        if how == "last" and geo:
+            from PySide6.QtCore import QByteArray
+            ok = self.restoreGeometry(QByteArray.fromBase64(geo.encode("ascii")))
+            if ok and self._on_screen():
+                if self.settings.get("window_max"):   # 최대화로 닫았으면 최대화로(풀면 닫기 전 크기)
+                    self.showMaximized(); return
+                self.show(); return
+            how = "max" if self.settings.get("window_max") else "normal"   # 그 모니터가 없어졌다
+        if how == "max":
+            self.showMaximized(); return
+        scr = self.screen().availableGeometry()
+        self.resize(min(1360, scr.width() - 40), min(820, scr.height() - 40))
+        self.move(scr.center() - self.rect().center())
+        self.show()
+
+    def _on_screen(self) -> bool:
+        """창 제목줄이 어느 화면 안에 들어 있나(모니터를 빼서 화면 밖으로 나가 있지 않나)."""
+        from PySide6.QtCore import QRect
+        g = self.normalGeometry() if self.normalGeometry().isValid() else self.geometry()
+        bar = QRect(g.left() + 40, g.top() - 25, max(g.width() - 80, 40), 25)   # 제목줄 가운데
+        return any(scr.availableGeometry().intersects(bar) for scr in QApplication.screens())
+
+    def reopen_last(self):
+        """환경 설정 「시작할 때 지난번 문서 다시 열기」."""
+        if self.prefs.get("restore"):
+            for p in self.settings.get("last_open", []):
+                if os.path.isfile(p):
+                    self.open_path(p)
+
+    def open_forwarded(self, paths: list[str]):
+        """다른 데서 켠 RPDF 가 넘긴 파일을 이 창의 탭으로 연다. 파일이 없으면 창만 앞으로."""
+        if self.isMinimized():   # 최대화였으면 최대화로 되돌아온다
+            self.setWindowState((self.windowState() & ~Qt.WindowState.WindowMinimized) | Qt.WindowState.WindowActive)
+        self.raise_(); self.activateWindow()
+        for p in paths:
+            if os.path.isfile(p):
+                self.open_path(p)
+
+    def _remember_window(self):
+        self.settings["window_max"] = self.isMaximized() or self.isFullScreen()
+        if not self.isFullScreen():
+            self.settings["window_geometry"] = bytes(self.saveGeometry().toBase64()).decode("ascii")
 
     # ── 화면 짓기 ─────────────────────────────────────────────
     def _build(self):
@@ -427,10 +475,19 @@ class MainWindow(QMainWindow):
         return True
 
     def closeEvent(self, e: QCloseEvent):
+        self._remember_window()
+        self.settings["last_open"] = [t.doc.path for t in self.tabs if t.doc.path]
+        if self._receiver:   # 닫는 동안 넘어오는 파일은 받지 않는다(닫히는 창에 열려 사라지지 않게)
+            self._receiver.stop()
         while self.tabs:
             if not self.close_tab(len(self.tabs) - 1):
+                if self._receiver:
+                    self._receiver.listen()
                 e.ignore(); return
         save_settings(self.settings)
+        if self._receiver:   # 이 뒤에 켜지는 RPDF 는 넘기지 않고 제 창을 띄운다
+            from .. import single
+            single.release()
         e.accept()
 
     def dragEnterEvent(self, e):

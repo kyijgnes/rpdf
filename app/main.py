@@ -32,12 +32,24 @@ def main(argv: list[str] | None = None) -> int:
     app.setOrganizationName(ORG)
     app.setApplicationVersion(VERSION)
     app.setFont(QFont("Malgun Gothic", 9))
+    from . import single
+    alone = bool(os.environ.get("PDFAPP_SHOT"))   # 화면 찍기 확인은 켜져 있는 창과 상관없이
+    first = alone or single.claim_first()
+    if not first and not after_update:
+        # 이미 켜진 창이 있다: 파일을 넘기고(그 창에 탭으로 열린다) 끝낸다. 못 넘기면 그냥 이 창을 띄운다
+        if single.send([p for p in argv if os.path.exists(p)]):
+            return 0
+        first = single.claim_first()   # 받는 창이 그사이 닫혔으면 이쪽이 첫 창이 된다
     from .ui.window import MainWindow
     w = MainWindow()
-    w.show()
-    for p in argv:
-        if os.path.exists(p):
-            w.open_path(p)
+    if first and not alone:
+        w._receiver = single.Receiver(w.open_forwarded)
+    w.show_initial()
+    files = [p for p in argv if os.path.exists(p)]
+    if not files and not after_update:
+        w.reopen_last()
+    for p in files:
+        w.open_path(p)
     from PySide6.QtCore import QTimer
     from .ui.update import after_update as reopen
     reopen(w, after_update)

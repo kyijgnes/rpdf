@@ -761,6 +761,8 @@ class PreferencesDialog(QDialog):
         self.layout_.setCurrentIndex(["continuous", "single", "facing", "facing_continuous"].index(prefs.get("default_layout", "continuous")))
         f.addRow("열 때 보기", self.layout_)
         self.dark = QCheckBox("어두운 화면"); self.dark.setChecked(prefs.get("dark", False)); f.addRow(self.dark)
+        self.winsize = QComboBox(); self.winsize.addItems(["마지막으로 닫은 크기", "화면 가득", "보통 크기"])
+        self.winsize.setCurrentIndex(["last", "max", "normal"].index(prefs.get("window_size", "last"))); f.addRow("열 때 창 크기", self.winsize)
         self.restore = QCheckBox("시작할 때 지난번 문서 다시 열기"); self.restore.setChecked(prefs.get("restore", False)); f.addRow(self.restore)
         self.recent_n = QSpinBox(); self.recent_n.setRange(5, 100); self.recent_n.setValue(prefs.get("recent_n", 30)); f.addRow("최근 파일 개수", self.recent_n)
         tabs.addTab(w, "일반")
@@ -775,7 +777,8 @@ class PreferencesDialog(QDialog):
     def values(self) -> dict:
         return {"author": self.author.text(), "default_zoom": ["fit_width", "fit_page", "actual", "last"][self.zoom.currentIndex()],
                 "default_layout": ["continuous", "single", "facing", "facing_continuous"][self.layout_.currentIndex()],
-                "dark": self.dark.isChecked(), "restore": self.restore.isChecked(), "recent_n": self.recent_n.value(),
+                "dark": self.dark.isChecked(), "restore": self.restore.isChecked(),
+                "window_size": ["last", "max", "normal"][self.winsize.currentIndex()], "recent_n": self.recent_n.value(),
                 "default_dir": self.default_dir.text(), "share_dir": self.share_dir.text(), "ocr_lang": self.ocr_lang.text(),
                 "unit": self.unit.currentText()}
 
