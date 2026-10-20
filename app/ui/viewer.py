@@ -151,6 +151,7 @@ class PageView(QGraphicsView):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
 
+        self.closed = False
         self.zoom = 1.0
         self.zoom_mode = "fit_width"  # fixed / fit_width / fit_page / fit_height
         self.layout_mode = "continuous"  # single / continuous / facing / facing_continuous
@@ -211,13 +212,18 @@ class PageView(QGraphicsView):
 
     # ── 배치 ──────────────────────────────────────────────────
     def close(self):
+        # 닫은 뒤에도 창 맞춤 타이머·singleShot 이 돌아 닫힌 문서를 읽다 「document closed」 가 났다
+        self.closed = True
+        self._fit_timer.stop()
         self.worker.stop()
 
     def page_rect_pt(self, i: int) -> fitz.Rect:
         return self.doc.fitz[i].rect
 
-    def rebuild(self):
-        """쪽 수·크기가 바뀌었을 때 전부 다시 놓는다."""
+    def rebuild(self, mapping: list[int | None] | None = None, dirty=()):
+        """쪽 수·크기가 바뀌었을 때 전부 다시 놓는다. mapping[새 쪽] = 옛 쪽 이면 그 그림을 옮겨 쓴다
+        (dirty 에 든 새 쪽은 다시 그림). 회전·삭제·순서 바꾸기에서 안 바뀐 쪽까지 다시 그리지 않게."""
+        old = {it.index: (it.pm, it.pm_zoom) for it in self.items if it.pm is not None} if mapping is not None else {}
         self.scene_.clear()
         self.items = []
         self.words_cache.clear(); self.blocks_cache.clear()
@@ -225,9 +231,12 @@ class PageView(QGraphicsView):
         n = self.doc.page_count
         for i in range(n):
             it = PageItem(self, i)
+            if mapping is not None and i < len(mapping) and i not in dirty and mapping[i] in old:
+                it.pm, it.pm_zoom = old[mapping[i]]
             self.scene_.addItem(it)
             self.items.append(it)
         self.worker.invalidate()
+        self._pending.clear()  # 버린 부탁이 남아 있으면 그 쪽을 다시 부탁하지 못해 흰 쪽으로 남는다
         self.relayout()
         self.current = min(self.current, n - 1)
 
@@ -317,7 +326,7 @@ class PageView(QGraphicsView):
         self._apply_fit()
 
     def _apply_fit(self):
-        if self.zoom_mode == "fixed" or not self.items:
+        if self.closed or self.zoom_mode == "fixed" or not self.items:
             return
         i = max(0, min(self.current, len(self.items) - 1))
         r = self.page_rect_pt(i)
@@ -347,6 +356,8 @@ class PageView(QGraphicsView):
         self.worker.request(i, self.zoom)
 
     def _request_visible(self):
+        if self.closed:
+            return
         vis = self.visible_pages()
         for i in vis:
             it = self.items[i]
@@ -388,11 +399,12 @@ class PageView(QGraphicsView):
         it.pm_zoom = zoom
         it.update()
 
-    def refresh_pages(self, pages: list[int] | None = None, structural: bool = False):
-        """문서가 바뀐 뒤 다시 그린다. structural=True 면 쪽 수·크기도 바뀐 것."""
+    def refresh_pages(self, pages: list[int] | None = None, structural: bool = False,
+                      mapping: list[int | None] | None = None):
+        """문서가 바뀐 뒤 다시 그린다. structural=True 면 쪽 수·크기도 바뀐 것(mapping 은 rebuild 를 볼 것)."""
         self.words_cache.clear(); self.blocks_cache.clear()
         if structural:
-            self.rebuild()
+            self.rebuild(mapping, set(pages or ()))
         else:
             self.worker.invalidate()
             self._pending.clear()
@@ -437,6 +449,8 @@ class PageView(QGraphicsView):
 
     # ── 이동 ──────────────────────────────────────────────────
     def goto(self, i: int, y_pt: float | None = None):
+        if self.closed:
+            return
         i = max(0, min(i, self.doc.page_count - 1))
         if self.layout_mode in ("single", "facing") and i not in self.visible_pages_for_layout():
             self.current = i

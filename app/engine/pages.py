@@ -108,6 +108,7 @@ def insert_from_pdf(doc: Document, at: int, path: str, pages: Iterable[int] | No
     if not src.is_pdf:
         src = fitz.open("pdf", src.convert_to_pdf())
     doc.snapshot()  # 확인을 마친 뒤에(실패해도 되돌리기 걸음이 남지 않게)
+    doc.dedupe = True  # 끼운 문서와 같은 글꼴·그림이 겹칠 수 있어 저장 때 합친다
     with doc.lock:
         if pages is None:
             doc.fitz.insert_pdf(src, start_at=at)
@@ -119,6 +120,7 @@ def insert_from_pdf(doc: Document, at: int, path: str, pages: Iterable[int] | No
 
 def insert_images(doc: Document, at: int, paths: list[str]):
     doc.snapshot()
+    doc.dedupe = True
     with doc.lock:
         for k, p in enumerate(paths):
             img = fitz.open(p)
@@ -226,6 +228,7 @@ def replace(doc: Document, pages: list[int], path: str, src_pages: list[int] | N
         src.close()
         raise ValueError(f"가져올 쪽이 원본에 없습니다(1~{n}쪽)")
     doc.snapshot()
+    doc.dedupe = True
     with doc.lock:
         at = pages[0]
         doc.fitz.delete_pages(pages)
@@ -239,6 +242,7 @@ def replace(doc: Document, pages: list[int], path: str, src_pages: list[int] | N
 
 def duplicate(doc: Document, pages: list[int]):
     doc.snapshot()
+    doc.dedupe = True  # fullcopy_page 는 내용을 통째로 한 벌 더 만든다
     with doc.lock:
         for i in sorted(pages, reverse=True):
             doc.fitz.fullcopy_page(i, i + 1)

@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QMenu, QVBoxLayout, QWidget
 
 from ..engine.document import Document
-from .sidebar import LazyThumbs, PageGrid, fill_grid
+from .sidebar import LazyThumbs, PageGrid, fill_grid, kept_thumbs
 
 
 class OrganizeView(QWidget):
@@ -42,9 +42,10 @@ class OrganizeView(QWidget):
             if it.data(Qt.ItemDataRole.UserRole) in pages:
                 it.setSelected(True)
 
-    def reload(self):
+    def reload(self, mapping: list[int | None] | None = None, dirty=()):
+        keep = kept_thumbs(self.thumbs, mapping, dirty)
         fill_grid(self.list, self.doc, self.thumb_w, 20, 40)
-        self.thumbs.start(self.thumb_w, self.devicePixelRatioF())
+        self.thumbs.start(self.thumb_w, self.devicePixelRatioF(), keep)
 
     def _menu(self, pos):
         pages = self.selected_pages()

@@ -147,15 +147,19 @@ class DocTab(QWidget):
         if key == "search":
             self.search.focus()
 
-    def changed(self, pages: list[int] | None, structural: bool = False):
-        """문서가 바뀌었다: 뷰어·썸네일·목록을 새로 그린다."""
-        self.viewer.refresh_pages(pages, structural=structural)
+    def changed(self, pages: list[int] | None, structural: bool = False, mapping: list[int | None] | None = None):
+        """문서가 바뀌었다: 뷰어·썸네일·목록을 새로 그린다.
+        structural 일 때 mapping[새 쪽] = 옛 쪽 을 주면 안 바뀐 쪽 그림은 옮겨 쓰고 pages(새 쪽 번호)만 다시 그린다.
+        mapping 없이 pages 만 주면 쪽 수는 그대로이고 그 쪽만 바뀐 것(회전)."""
+        if structural and mapping is None and pages is not None:
+            mapping = list(range(self.doc.page_count))
+        dirty = set(pages or ())
+        self.viewer.refresh_pages(pages, structural=structural, mapping=mapping)
         if structural:
-            self.thumbs.reload(); self.organize.reload()
+            self.thumbs.reload(mapping, dirty); self.organize.reload(mapping, dirty)
         else:
             self.thumbs.refresh_pages(pages)
-            if self.view_stack.currentWidget() is self.organize:
-                self.organize.reload()
+            self.organize.thumbs.forget(pages)   # 숨어 있으면 안 그리고, 다음에 보일 때 그린다
         self.annots.reload(); self.fieldlist.reload(); self.bookmarks.reload(); self.attachments.reload(); self.layers.reload()
         self.win.mark_modified()
 
@@ -163,13 +167,12 @@ class DocTab(QWidget):
         """보기 설정(레이어 켜고 끄기)만 바뀌었다: 다시 그리되 고친 문서로 치지 않는다."""
         self.viewer.refresh_pages(None)
         self.thumbs.refresh_pages(None)
-        if self.view_stack.currentWidget() is self.organize:
-            self.organize.reload()
+        self.organize.thumbs.forget(None)
 
     def reorder(self, order: list[int]):
         P.reorder(self.doc, order)
         self.viewer.clear_selection()
-        self.changed(None, structural=True)
+        self.changed(None, structural=True, mapping=list(order))
 
     def show_hits(self, hits, current):
         self.viewer.search_hits = hits
@@ -598,7 +601,8 @@ class MainWindow(QMainWindow):
         if not t:
             return
         if key == "page":
-            t.view_stack.setCurrentWidget(t.organize); t.organize.reload()
+            # 구성 화면은 문서가 바뀔 때마다 맞춰 두므로(changed) 다 그린 썸네일은 그대로 쓴다
+            t.view_stack.setCurrentWidget(t.organize); t.organize.reload(list(range(t.doc.page_count)))
         else:
             t.view_stack.setCurrentWidget(t.viewer)
         if key == "form" and not t.viewer.form_mode:
@@ -830,7 +834,8 @@ class MainWindow(QMainWindow):
             elif key == "delete":
                 if d.page_count <= len(pages): self.say("쪽을 전부 지울 수는 없습니다"); return
                 if len(pages) > 1 and QMessageBox.question(self, "페이지 삭제", f"{len(pages)}쪽을 지울까요?") != QMessageBox.StandardButton.Yes: return
-                P.delete(d, pages); v.clear_selection(); t.changed(None, structural=True)
+                gone = set(pages); keep = [i for i in range(d.page_count) if i not in gone]
+                P.delete(d, pages); v.clear_selection(); t.changed(None, structural=True, mapping=keep)
             elif key == "extract":
                 out, _ = QFileDialog.getSaveFileName(self, "쪽 내보내기", self._suggest(t, "_추출.pdf"), PDF_FILTER)
                 if out: P.extract(d, pages, out); self.say(f"{len(pages)}쪽을 저장했습니다: {out}"); self._offer_open(out)
@@ -846,7 +851,9 @@ class MainWindow(QMainWindow):
             elif key == "insert_images":
                 paths, _ = QFileDialog.getOpenFileNames(self, "끼울 이미지", "", "이미지 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.gif *.webp)")
                 if paths: P.insert_images(d, cur + 1, paths); t.changed(None, structural=True)
-            elif key == "duplicate": P.duplicate(d, pages); t.changed(None, structural=True)
+            elif key == "duplicate":
+                dup = set(pages); m = [k for i in range(d.page_count) for k in ((i, i) if i in dup else (i,))]
+                P.duplicate(d, pages); t.changed(None, structural=True, mapping=m)
             elif key == "replace":
                 p, _ = QFileDialog.getOpenFileName(self, "바꿀 내용이 든 PDF", "", OPEN_FILTER)
                 if not p: return
@@ -869,7 +876,8 @@ class MainWindow(QMainWindow):
             elif key == "delete_blank":
                 T = _engine("tools"); d.snapshot(); gone = T.delete_blank_pages(d.fitz)
                 t.changed(None, structural=True); self.say(f"빈 쪽 {len(gone)}장을 지웠습니다")
-            elif key == "reverse": P.reorder(d, list(range(d.page_count - 1, -1, -1))); t.changed(None, structural=True)
+            elif key == "reverse":
+                rev = list(range(d.page_count - 1, -1, -1)); P.reorder(d, rev); t.changed(None, structural=True, mapping=rev)
             elif key == "split":
                 dlg = D.SplitDialog(self, d.page_count, os.path.dirname(d.path) if d.path else os.path.expanduser("~"))
                 if dlg.exec():
@@ -1013,7 +1021,7 @@ class MainWindow(QMainWindow):
         elif kind == "open_file":
             if data and os.path.exists(data) and QMessageBox.question(self, "링크", f"이 파일을 열까요?\n{data}") == QMessageBox.StandardButton.Yes:
                 os.startfile(data)
-        elif kind == "rotate": P.rotate(d, data["pages"], data["deg"]); t.changed(None, structural=True)
+        elif kind == "rotate": P.rotate(d, data["pages"], data["deg"]); t.changed(list(data["pages"]), structural=True)
         elif kind == "delete_pages": self.pages_action("delete", data["pages"])
 
     # ── 파일 메뉴 ─────────────────────────────────────────────
@@ -1198,10 +1206,14 @@ class MainWindow(QMainWindow):
         if not dlg.exec():
             return
         vals = dlg.values()
-        t.doc.snapshot()
-        n = D.ProgressDialog(self, "OCR", O.ocr_pages, t.doc.fitz, pages=vals["pages"], lang=vals["lang"], dpi=vals["dpi"], force=vals["force"]).run()
+        # 일꾼에는 사본을 준다. 보는 문서를 그대로 주면 그리는 일꾼과 같은 문서를 동시에 만져 튕길 수 있다
+        work = t.doc.copy()
+        n = D.ProgressDialog(self, "OCR", O.ocr_pages, work, pages=vals["pages"], lang=vals["lang"], dpi=vals["dpi"], force=vals["force"]).run()
         if n is not None:
+            t.doc.adopt(work)   # 되돌리기 사본을 뜬 뒤 바꿔 끼운다
             t.changed(None); self.say(f"글자 {n}개를 인식해 넣었습니다. 이제 찾기·복사가 됩니다.")
+        else:
+            work.close()
 
     def merge(self):
         t = self.cur()
@@ -1278,9 +1290,12 @@ class MainWindow(QMainWindow):
 
     def deskew(self, t: DocTab):
         T = _engine("tools")
-        t.doc.snapshot()
-        angles = D.ProgressDialog(self, "기울기 보정", T.deskew, t.doc.fitz).run()
-        if angles is not None:
+        work = t.doc.copy()   # OCR 과 같은 까닭으로 사본에서
+        angles = D.ProgressDialog(self, "기울기 보정", T.deskew, work).run()
+        if angles is None:
+            work.close()
+        else:
+            t.doc.adopt(work)
             t.changed(None, structural=True); self.say(f"{sum(1 for a in angles if abs(a) > 0.1)}쪽을 바로잡았습니다")
 
     def table_recognize(self, t: DocTab):

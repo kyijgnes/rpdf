@@ -114,9 +114,24 @@ class LazyThumbs:
         grid.verticalScrollBar().valueChanged.connect(self.kick)
         grid.shown.connect(self.kick)
 
-    def start(self, width: int, dpr: float):
+    def pixmaps(self) -> dict[int, QPixmap]:
+        """다 그린 썸네일(쪽 → 그림). 쪽 구조가 바뀔 때 안 바뀐 쪽 그림을 옮겨 쓰려고."""
+        out = {}
+        for k in range(self.grid.count()):   # 끌어 옮긴 직후엔 칸 차례가 쪽 차례와 다르다: 칸에 적힌 쪽으로 찾는다
+            it = self.grid.item(k)
+            p = it.data(Qt.ItemDataRole.UserRole)
+            if p in self.have:
+                out[p] = it.data(ThumbDelegate.PIX)
+        return out
+
+    def start(self, width: int, dpr: float, keep: dict[int, QPixmap] | None = None):
+        """keep: 새 쪽 → 옮겨 쓸 그림(그 쪽은 다시 그리지 않는다)."""
         self.stop()
         self.have.clear(); self.asked.clear()
+        for p, pm in (keep or {}).items():
+            if p < self.grid.count():
+                self.grid.item(p).setData(ThumbDelegate.PIX, pm)
+                self.have.add(p)
         self.worker = ThumbWorker(self.doc, width, dpr)
         self.worker.done.connect(self._done)
         self.worker.start()
@@ -256,6 +271,14 @@ class PageGrid(QListWidget):
             self.reordered.emit(order)
 
 
+def kept_thumbs(lazy: "LazyThumbs", mapping: list[int | None] | None, dirty=()) -> dict[int, QPixmap]:
+    """mapping[새 쪽] = 옛 쪽 으로 옮겨 쓸 썸네일. dirty 에 든 새 쪽은 빼고(다시 그림)."""
+    if mapping is None:
+        return {}
+    old = lazy.pixmaps()
+    return {k: old[o] for k, o in enumerate(mapping) if o in old and k not in dirty}
+
+
 def fill_grid(grid: PageGrid, doc: Document, thumb_w: int, pad_w: int, pad_h: int):
     """쪽마다 빈 흰 칸을 놓는다(그림은 LazyThumbs 가 보이는 칸부터 채움)."""
     grid.setUpdatesEnabled(False)
@@ -306,9 +329,10 @@ class ThumbnailPanel(QWidget):
     def selected_pages(self) -> list[int]:
         return sorted(it.data(Qt.ItemDataRole.UserRole) for it in self.list.selectedItems())
 
-    def reload(self):
+    def reload(self, mapping: list[int | None] | None = None, dirty=()):
+        keep = kept_thumbs(self.thumbs, mapping, dirty)
         fill_grid(self.list, self.doc, self.thumb_w, 16, 34)
-        self.thumbs.start(self.thumb_w, self.devicePixelRatioF())
+        self.thumbs.start(self.thumb_w, self.devicePixelRatioF(), keep)
 
     def refresh_pages(self, pages: list[int] | None):
         self.thumbs.forget(pages)

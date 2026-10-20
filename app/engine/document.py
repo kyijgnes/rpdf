@@ -211,6 +211,7 @@ class Document:
         self.lock = threading.RLock()
         self.password = password
         self.hidden_layers: set[str] = set()  # 화면에서 끈 레이어 이름(보기 설정, 파일은 그대로)
+        self.dedupe = False  # 다른 PDF 를 끼웠다: 저장할 때 같은 객체를 합친다(garbage=3)
         if path:
             self._open(path, password)
         else:
@@ -272,6 +273,7 @@ class Document:
         self.lock = threading.RLock()
         self.password = None
         self.hidden_layers = set()
+        self.dedupe = False
         return self
 
     @classmethod
@@ -286,6 +288,7 @@ class Document:
         self.lock = threading.RLock()
         self.password = None
         self.hidden_layers = set()
+        self.dedupe = False
         return self
 
     def close(self):
@@ -325,8 +328,9 @@ class Document:
                 except Exception:  # noqa: BLE001
                     pass
                 # 열 때의 암호·권한을 그대로 둔다(그냥 저장하면 암호가 풀린다).
-                # garbage=3(같은 객체 합치기)은 스캔 376쪽에서 1.3초 걸리고 크기는 0.04% 줄 뿐이라 2(안 쓰는 것 지우고 번호 다시 매김)로
-                self.fitz.save(tmp, garbage=2, deflate=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+                # garbage=3(같은 객체 합치기)은 스캔 376쪽에서 1.3초 걸리고 크기는 0.04% 줄 뿐이라, 다른 PDF 를 끼웠을 때만 쓴다.
+                # 평소엔 2(안 쓰는 것 지우고 번호 다시 매김): 1 과 빠르기는 같고 파일이 1.5% 작다
+                self.fitz.save(tmp, garbage=3 if self.dedupe else 2, deflate=True, encryption=fitz.PDF_ENCRYPT_KEEP)
                 # 저장 뒤에도 계속 편집할 수 있게 다시 연다
                 with open(tmp, "rb") as f:
                     data = f.read()
@@ -338,6 +342,7 @@ class Document:
             self.fitz = self._load(data)
             self.path = target
             self.modified = False
+            self.dedupe = False
 
     def to_bytes(self) -> bytes:
         with self.lock:
@@ -347,6 +352,15 @@ class Document:
         """일꾼 스레드·변환에 넘길 사본(보는 문서는 그리는 일꾼이 같이 쓰고, 암호 문서는 그냥 쓰면 망가진다)."""
         with self.lock:
             return keep_copy(self.fitz, self.password)
+
+    def adopt(self, f: fitz.Document):
+        """일꾼이 사본(copy())에서 고친 결과를 이 문서로 바꿔 끼운다. 되돌리기 사본을 먼저 뜬다."""
+        self.snapshot()
+        with self.lock:
+            old = self.fitz
+            self._apply_layers(f)
+            self.fitz = f
+            old.close()
 
     # ── 되돌리기 ───────────────────────────────────────────────
     def snapshot(self):

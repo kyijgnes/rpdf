@@ -21,6 +21,38 @@ EXCLUDE = ("torch", "torchvision", "torchgen", "functorch", "scipy", "matplotlib
 
 VERSION_FILE = "_version_info.txt"   # 빌드하는 동안만 있다
 
+# PyInstaller 가 PySide6 에서 같이 싣지만 앱이 안 쓰는 것(_internal\PySide6 기준). 10-20 측정: 설치 폴더 248MB 중 약 45MB.
+# 누가 쓰는지는 측정\dll_deps.py 로 PE import 표를 보고 골랐다.
+PRUNE = (
+    "opengl32sw.dll",                     # 소프트웨어 OpenGL(그래픽 드라이버가 없을 때 쓰는 대체품). 앱은 OpenGL 을 안 씀
+    # Qt Quick·Qml 묶음: 가상 키보드 플러그인만 이것들을 쓴다(앱은 위젯만)
+    "Qt6Quick.dll", "Qt6Qml.dll", "Qt6QmlModels.dll", "Qt6QmlMeta.dll", "Qt6QmlWorkerScript.dll", "Qt6OpenGL.dll",
+    "Qt6VirtualKeyboard.dll", os.path.join("plugins", "platforminputcontexts"),
+    # Qt 의 TLS 와 그것만 쓰는 OpenSSL 한 벌. 업데이트 확인(HTTPS)은 파이썬 ssl(_ssl.pyd → libssl-3.dll)을 쓴다
+    os.path.join("plugins", "tls"), os.path.join("..", "libssl-3-x64.dll"), os.path.join("..", "libcrypto-3-x64.dll"),
+)
+KEEP_QM = "_ko.qm"   # Qt 번역은 한국어만 남긴다
+
+
+def prune(internal: str) -> int:
+    """빌드한 _internal 에서 PRUNE 과 한국어가 아닌 Qt 번역을 지운다. 지운 바이트 수."""
+    def size(p):
+        if os.path.isfile(p):
+            return os.path.getsize(p)
+        return sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(p) for f in fs)
+    qt = os.path.join(internal, "PySide6")
+    gone = 0
+    targets = [os.path.normpath(os.path.join(qt, p)) for p in PRUNE]
+    tr = os.path.join(qt, "translations")
+    if os.path.isdir(tr):
+        targets += [os.path.join(tr, f) for f in os.listdir(tr) if not f.endswith(KEEP_QM)]
+    for p in targets:
+        if not os.path.exists(p):
+            continue
+        gone += size(p)
+        shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
+    return gone
+
 
 def write_version_file() -> str:
     """exe 버전 정보(파일 설명·제품 이름·버전·회사). 비어 있으면 탐색기 「연결 프로그램」이 이름을 못 붙인다(10-20)."""
@@ -69,6 +101,8 @@ def main() -> int:
     finally:
         os.remove(VERSION_FILE)
     if r == 0:
+        gone = prune(os.path.join(HERE, "dist", NAME, "_internal"))
+        print(f"안 쓰는 Qt 덩어리 {gone / 2**20:.0f}MB 지움")
         print("빌드 끝:", os.path.join(HERE, "dist", NAME, NAME + ".exe"))
     return r
 
