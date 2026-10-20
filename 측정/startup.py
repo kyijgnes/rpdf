@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import docs  # noqa: E402
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXE = os.path.join(os.environ["LOCALAPPDATA"], "Programs", "RPDF", "RPDF.exe")
+EXE = os.environ.get("RPDF_EXE") or os.path.join(os.environ["LOCALAPPDATA"], "Programs", "RPDF", "RPDF.exe")  # 시험 빌드는 RPDF_EXE 로
 
 
 def window_of(pid: int):
