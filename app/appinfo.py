@@ -6,7 +6,7 @@ APP_NAME = "RPDF"         # 화면에 보이는 이름(창 제목·도움말·�
 APP_ID = "RPDF"           # exe·설정 폴더 이름(띄어쓰기 없이)
 OLD_APP_IDS = ("PDF편집기",)  # 예전 APP_ID. 처음 켤 때 그 설정을 새 자리로 복사한다(설치 프로그램이 옛 흔적 정리할 때도 씀)
 ORG = "kyijgnes"
-VERSION = "0.1.2"         # 설치 프로그램·업데이트가 대조하는 버전
+VERSION = "0.1.3"         # 설치 프로그램·업데이트가 대조하는 버전
 
 # 앱 아이콘(창·작업표시줄·exe·설치 프로그램 공용). exe 안에서는 PyInstaller 가 풀어 둔 자리(_MEIPASS)에서 찾는다
 ICON = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "app.ico")
