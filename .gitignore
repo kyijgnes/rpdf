@@ -7,3 +7,4 @@ installer/defs.iss
 __pycache__/
 *.pyc
 .pytest_cache/
+_version_info.txt
