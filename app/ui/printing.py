@@ -4,7 +4,8 @@
 크기/포스터/여러 페이지/소책자), 오른쪽 미리보기와 쪽 넘기기. 「고급 설정 숨기기」 로 가운데 칸을 접는다.
 
 종이 한 장에 무엇을 어디에 그릴지는 plan() 한 곳에서 정하고(Sheet·Cell), 미리보기와 보내기가 같은 계산을 쓴다.
-보내기는 칸마다 쪽을 그림(프린터 해상도, 최대 600dpi, 「이미지로 인쇄」 면 고른 dpi)으로 떠서 그린다.
+보내기는 칸마다 쪽을 선·면·글자 윤곽(벡터, print_vector)으로 그린다. 벡터로 못 옮기는 쪽(투명도 등)과
+「이미지로 인쇄」 만 그림(프린터 해상도, 최대 600dpi, 또는 고른 dpi)으로 떠서 그린다.
 그리는 동안 진행 막대와 [그만두기] 를 보이고, 프린터를 못 열면 한국어로 알린다. 일괄 인쇄도 send 로 보낸다
 (윈도우 「인쇄」 동작은 PDF 기본 앱에 따라 등록돼 있지 않아 늘 실패했다).
 """
@@ -17,13 +18,13 @@ from dataclasses import dataclass, field
 
 import fitz
 from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSizeF, Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPageLayout, QPageSize, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPageLayout, QPageSize, QPainter, QPen, QPixmap, QTransform
 from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFrame,
                                QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressDialog, QPushButton, QRadioButton,
                                QSpinBox, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from . import icons, theme
+from . import icons, print_vector as PV, theme
 
 FITS = [("fit", "맞춤"), ("actual", "실제 크기"), ("custom", "사용자 지정 배율")]
 SUBSETS = [("all", "모든 페이지"), ("odd", "홀수 페이지"), ("even", "짝수 페이지")]
@@ -347,12 +348,50 @@ def _cell_image(doc: fitz.Document, cell: Cell, dpi: float, color: bool, annots:
     return img, region * cell.m
 
 
+class VectorPages:
+    """보내기에서 쪽마다 벡터 그리기 명령을 한 번만 모아 둔다(여러 부·포스터 타일이 같은 쪽을 다시 씀).
+    벡터로 못 옮기는 쪽은 None 으로 적어 두고 비트맵으로 그린다."""
+
+    def __init__(self, doc: fitz.Document, color: bool, annots: bool, lock=None):
+        self.doc, self.gray, self.annots, self.lock = doc, not color, annots, lock
+        self.glyphs = PV.Glyphs()
+        self.pages: dict[int, list | None] = {}
+
+    def get(self, i: int):
+        if i not in self.pages:
+            if len(self.pages) > 8:  # 메모리: 최근 몇 쪽만
+                self.pages.pop(next(iter(self.pages)))
+            self.pages[i] = PV.record(self.doc[i], self.annots, self.gray, self.glyphs, self.lock)
+        return self.pages[i]
+
+
+def _cell_vector(p: QPainter, doc: fitz.Document, cell: Cell, ops: list, origin: QPointF, k: float):
+    page = doc[cell.page]
+    src = (cell.src or page.rect) & page.rect
+    vis = (src * cell.m) & cell.clip
+    if vis.is_empty or vis.width < 0.01 or vis.height < 0.01:
+        return
+    m = cell.m  # 그리기 명령은 page.rect 와 같은 좌표(fz_run_page 를 단위 행렬로 돌림)
+    to_dev = (QTransform(m.a, m.b, m.c, m.d, m.e, m.f) * QTransform.fromScale(k, k)
+              * QTransform.fromTranslate(origin.x(), origin.y()))
+    p.save()
+    p.setClipRect(QRectF(origin.x() + vis.x0 * k, origin.y() + vis.y0 * k, vis.width * k, vis.height * k))
+    PV.play(p, ops, to_dev)
+    p.restore()
+
+
 def draw_sheet(p: QPainter, sheet: Sheet, doc: fitz.Document, origin: QPointF, k: float, dpi: float, color: bool,
-               annots: bool, lock=None, cache: dict | None = None, key=None):
-    """종이 한 면을 p 에 그린다. origin 은 종이 왼쪽 위(장치 좌표), k 는 pt → 장치 점."""
+               annots: bool, lock=None, cache: dict | None = None, key=None, vector: VectorPages | None = None):
+    """종이 한 면을 p 에 그린다. origin 은 종이 왼쪽 위(장치 좌표), k 는 pt → 장치 점.
+    vector 가 있으면 쪽을 선·면으로 그리고(인쇄), 벡터로 못 옮기는 쪽만 dpi 비트맵으로 그린다."""
     for n, cell in enumerate(sheet.cells):
         if cell.page < 0:
             continue
+        if vector is not None:
+            ops = vector.get(cell.page)
+            if ops is not None:
+                _cell_vector(p, doc, cell, ops, origin, k)
+                continue
         ck = (key, n, round(dpi, 1))
         got = cache.get(ck) if cache is not None else None
         if got is None:
@@ -382,15 +421,25 @@ def _layout_for(w: float, h: float, ps: QPageSize | None = None) -> tuple[QPageS
 
 
 def make_printer(opts: PrintOptions, doc: fitz.Document, to_file: str = "") -> QPrinter:
-    p = QPrinter(QPrinter.PrinterMode.HighResolution)
+    # 이름으로 바로 연다(빈 QPrinter 는 기본 프린터 드라이버부터 열어 0.3~0.5초를 더 쓴다)
+    info = QPrinterInfo.printerInfo(opts.printer) if opts.printer else None
+    p = QPrinter(info, QPrinter.PrinterMode.HighResolution) if info is not None and not info.isNull() \
+        else QPrinter(QPrinter.PrinterMode.HighResolution)
     out = to_file or opts.to_file
     if out and not opts.printer:
         p.setOutputFormat(QPrinter.OutputFormat.PdfFormat)  # Qt 자체 PDF
         p.setOutputFileName(out)
+    elif out:
+        # 윈도우 드라이버로 「파일로 인쇄」(시험: Microsoft Print to PDF 가 창 없이 씀). 이름이 .pdf 면 Qt 가 자체 PDF 로
+        # 바꾸므로 드라이버 출력으로 되돌린다. 되돌리면 기본 프린터로 바뀌니 이름을 맨 나중에 넣고, 다르면 멈춘다(종이가 나옴)
+        p.setOutputFileName(out)
+        p.setOutputFormat(QPrinter.OutputFormat.NativeFormat)
+        p.setPrinterName(opts.printer)
+        same = os.path.normcase(os.path.abspath(p.outputFileName())) == os.path.normcase(os.path.abspath(out))
+        if p.printerName() != opts.printer or not same:
+            raise RuntimeError(f"파일로 인쇄를 준비하지 못했습니다: {p.printerName()}")
     else:
         p.setPrinterName(opts.printer)
-        if out:
-            p.setOutputFileName(out)  # 윈도우 드라이버로 「파일로 인쇄」(시험: Microsoft Print to PDF 가 창 없이 씀)
     p.setPageSize(opts.page_size if isinstance(opts.page_size, QPageSize) else _page_size(opts.paper))
     w, h = paper_wh(opts, doc)
     p.setPageOrientation(QPageLayout.Orientation.Landscape if w > h else QPageLayout.Orientation.Portrait)
@@ -473,6 +522,8 @@ def _job(parent, doc: fitz.Document, opts: PrintOptions, sheets: list[Sheet], na
         bar.setWindowTitle("인쇄"); bar.setWindowModality(Qt.WindowModality.WindowModal); bar.setMinimumDuration(400)
         bar.setMinimumWidth(320)
     dpi = opts.dpi if opts.as_image else min(printer.resolution(), MAX_DPI)
+    # 「이미지로 인쇄」 가 아니면 선·면으로 보낸다(스풀이 작아 빠르고 글자가 프린터 해상도 그대로)
+    vector = None if opts.as_image else VectorPages(doc, opts.color, opts.annots or opts.forms, lock)
     try:
         for n, sh in enumerate(seq):
             if bar is not None:
@@ -487,7 +538,7 @@ def _job(parent, doc: fitz.Document, opts: PrintOptions, sheets: list[Sheet], na
                 printer.newPage()
             paper = printer.paperRect(QPrinter.Unit.DevicePixel)
             k = paper.width() / max(1.0, sh.w)
-            draw_sheet(painter, sh, doc, QPointF(0, 0), k, dpi, opts.color, opts.annots or opts.forms, lock)
+            draw_sheet(painter, sh, doc, QPointF(0, 0), k, dpi, opts.color, opts.annots or opts.forms, lock, vector=vector)
     finally:
         painter.end()
         if bar is not None:

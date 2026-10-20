@@ -199,3 +199,30 @@ def test_sent_page_lands_where_planned(app, tmp_path):
                     r, g, b = pix.pixel(x, y)[:3]
                     blue += b > 150 and b - r > 50
             assert blue > 20, (qx, qy)
+
+
+def test_vector_record_matches_raster(app):
+    """벡터로 모은 그리기 명령을 그림으로 그리면 MuPDF 비트맵과 같아야 한다."""
+    import numpy as np
+    from PySide6.QtGui import QColor, QImage, QPainter, QTransform
+    from app.ui import print_vector as PV
+    d = make_doc(1)
+    p = d[0]
+    p.insert_text((100, 200), "굵은 글씨", fontname="korea", fontsize=30, render_mode=2, border_width=0.05)
+    ops = PV.record(p, True, False)
+    assert ops
+    z = 100 / 72
+    pix = p.get_pixmap(matrix=fitz.Matrix(z, z))
+    img = QImage(pix.width, pix.height, QImage.Format.Format_RGB888); img.fill(QColor("white"))
+    qp = QPainter(img); qp.setRenderHint(QPainter.RenderHint.Antialiasing)
+    PV.play(qp, ops, QTransform.fromScale(z, z)); qp.end()
+    a = np.frombuffer(img.constBits(), np.uint8).reshape(img.height(), img.bytesPerLine())[:, :img.width() * 3]
+    b = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.stride)[:, :pix.width * 3]
+    assert np.abs(a.astype(int) - b.astype(int)).mean() < 3
+
+
+def test_vector_falls_back_on_transparency(app):
+    d = make_doc(1)
+    d[0].draw_rect(fitz.Rect(50, 50, 200, 200), color=None, fill=(1, 0, 0), fill_opacity=0.5)
+    from app.ui import print_vector as PV
+    assert PV.record(d[0], True, False) is None  # 비트맵으로 그리게 한다
