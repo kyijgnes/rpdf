@@ -132,7 +132,7 @@ def bench(win: MainWindow, name: str) -> list[dict]:
 
     measure("열기 → 첫 화면", lambda: win.open_path(work), lambda: rendered(tab().viewer), out=out)
     t_ = tab(); v = t_.viewer; d = t_.doc
-    thumbs_busy = lambda: (t_.thumbs.worker and t_.thumbs.worker.isRunning()) or (t_.organize.worker and t_.organize.worker.isRunning())
+    thumbs_busy = lambda: t_.thumbs.thumbs.busy() or t_.organize.thumbs.busy()
     measure("열고 나서 썸네일·구성 일꾼이 다 그릴 때까지(숨은 패널)", lambda: None, lambda: not thumbs_busy(), out=out)
 
     # 쪽 넘기기: 한 화면씩 내려가며 그 화면이 다 그려질 때까지
@@ -185,13 +185,21 @@ def bench(win: MainWindow, name: str) -> list[dict]:
     measure("창 크기 바꾸기(1360→1000 폭, 창 너비 맞춤)", lambda: win.resize(1000, 820), lambda: rendered(v), out=out)
     win.resize(1360, 820); pump(0.2); wait(lambda: rendered(v), 20)
 
-    measure("썸네일 패널 열기", lambda: win.toggle_side("thumbs"), None, out=out)
+    lt = getattr(t_.thumbs, "thumbs", None)  # 고친 뒤: 보이는 칸만 그리는 LazyThumbs
+    measure("썸네일 패널 열기 → 보이는 칸 다 그림", lambda: win.toggle_side("thumbs"),
+            (lambda: bool(lt.have) and not lt.busy()) if lt else None, out=out)
+    if lt:
+        print("   그린 썸네일", len(lt.have), "/", d.page_count)
+        lsb = t_.thumbs.list.verticalScrollBar()
+        measure("썸네일 패널 맨 끝으로 → 보이는 칸 다 그림", lambda: lsb.setValue(lsb.maximum()),
+                lambda: (d.page_count - 1) in lt.have and not lt.busy(), out=out)
+        print("   그린 썸네일", len(lt.have), "/", d.page_count)
     win.toggle_side("thumbs")
 
     # 검색
     word = common_word(d)
     t_.search.edit.setText(word)
-    measure(f"검색 「{word}」 전체", lambda: t_.search.run(), None, out=out)
+    measure(f"검색 「{word}」 전체", lambda: t_.search.run(), lambda: t_.search.count.text() != "찾는 중", out=out)
     print("   찾은 수", len(t_.search.hits))
     t_.search.edit.setText(""); t_.search.run()
 
@@ -262,7 +270,7 @@ def leak(win: MainWindow, name: str, n: int = 6) -> list[dict]:
         sb = v.verticalScrollBar()
         for _ in range(10):
             sb.setValue(sb.value() + v.viewport().height()); wait(lambda: rendered(v), 20)
-        wait(lambda: not (t_.thumbs.worker.isRunning() or t_.organize.worker.isRunning()), 120)
+        wait(lambda: not (t_.thumbs.thumbs.busy() or t_.organize.thumbs.busy()), 120)
         win.close_tab(win.tabs.index(t_))
         pump(0.3)
         import gc; flush_deletes(); gc.collect(); pump(0.2)

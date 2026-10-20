@@ -28,7 +28,7 @@ def once(win, work, label):
     st = B.ST.stop()
     print(f"{label}: 걸림 {sync:.2f}s / 첫 화면 {total:.2f}s / 최대 멈춤 {st['max_stall']:.2f}s")
     t_ = win.cur()
-    B.wait(lambda: not (t_.thumbs.worker.isRunning() or t_.organize.worker.isRunning()), 300)
+    B.wait(lambda: not (t_.thumbs.thumbs.busy() or t_.organize.thumbs.busy()), 300)
     t_.doc.modified = False
     win.close_tab(0); B.pump(0.3)
 

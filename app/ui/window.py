@@ -188,7 +188,7 @@ class DocTab(QWidget):
             self.changed([s.page])
 
     def close(self):
-        self.viewer.close(); self.thumbs.close(); self.organize.close()
+        self.viewer.close(); self.thumbs.close(); self.organize.close(); self.search.close()
         self.doc.close()
 
 

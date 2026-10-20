@@ -163,6 +163,7 @@ class PageView(QGraphicsView):
         self.show_annots = True
         self.rotation_cache: dict[int, int] = {}
         self.words_cache: dict[int, list[tuple]] = {}
+        self.blocks_cache: dict[int, list[dict]] = {}  # 편집 모드 글자 덩어리(문서가 바뀌면 비움)
 
         # 도구 속성(오른쪽 패널이 바꿈)
         self.props = {"stroke": (1, 0, 0), "fill": None, "width": 1.5, "opacity": 1.0,
@@ -219,7 +220,7 @@ class PageView(QGraphicsView):
         """쪽 수·크기가 바뀌었을 때 전부 다시 놓는다."""
         self.scene_.clear()
         self.items = []
-        self.words_cache.clear()
+        self.words_cache.clear(); self.blocks_cache.clear()
         self.rotation_cache.clear()
         n = self.doc.page_count
         for i in range(n):
@@ -346,10 +347,37 @@ class PageView(QGraphicsView):
         self.worker.request(i, self.zoom)
 
     def _request_visible(self):
-        for i in self.visible_pages():
+        vis = self.visible_pages()
+        for i in vis:
             it = self.items[i]
             if it.pm is None or it.pm_zoom != self.zoom:
                 self.need_render(i)
+        self._evict(vis)
+
+    KEEP_NEAR = 3              # 보이는 쪽 앞뒤로 그림을 남겨 둘 쪽 수
+    KEEP_BYTES = 300 * 2**20   # 남겨 둔 그림이 이보다 많으면 먼 쪽부터 버린다
+
+    def _evict(self, vis: list[int]):
+        """화면에서 먼 쪽 그림을 버린다. 안 버리면 끝까지 훑을 때 쪽 수만큼 쌓였다(126쪽 1GB, 10-20 측정).
+        다시 보이면 paint 가 그리기를 부탁한다."""
+        if not vis:
+            return
+        lo, hi = vis[0], vis[-1]
+        held = []
+        for it in self.items:
+            if it.pm is None:
+                continue
+            d = lo - it.index if it.index < lo else it.index - hi if it.index > hi else 0
+            if d > self.KEEP_NEAR:
+                it.pm = None
+            else:
+                held.append((d, it))
+        total = sum(it.pm.width() * it.pm.height() * 4 for _, it in held)
+        for d, it in sorted(held, key=lambda x: -x[0]):
+            if total <= self.KEEP_BYTES or d == 0:
+                break
+            total -= it.pm.width() * it.pm.height() * 4
+            it.pm = None
 
     def _rendered(self, page: int, zoom: float, img: QImage, gen: int):
         self._pending.discard(page)
@@ -362,7 +390,7 @@ class PageView(QGraphicsView):
 
     def refresh_pages(self, pages: list[int] | None = None, structural: bool = False):
         """문서가 바뀐 뒤 다시 그린다. structural=True 면 쪽 수·크기도 바뀐 것."""
-        self.words_cache.clear()
+        self.words_cache.clear(); self.blocks_cache.clear()
         if structural:
             self.rebuild()
         else:
@@ -469,6 +497,12 @@ class PageView(QGraphicsView):
         if i not in self.words_cache:
             self.words_cache[i] = self.doc.words(i)
         return self.words_cache[i]
+
+    def blocks(self, i: int) -> list[dict]:
+        """편집 모드에서 마우스가 움직일 때마다·다시 그릴 때마다 쓰여 쪽마다 한 번만 읽는다."""
+        if i not in self.blocks_cache:
+            self.blocks_cache[i] = self.doc.text_blocks(i)
+        return self.blocks_cache[i]
 
     # ── 도구 ──────────────────────────────────────────────────
     def set_tool(self, tool: str):
@@ -623,7 +657,7 @@ class PageView(QGraphicsView):
             hb = None
             if i >= 0:
                 pt = self.to_page(i, sp)
-                for b in self.doc.text_blocks(i):
+                for b in self.blocks(i):
                     if fitz.Rect(b["bbox"]).contains(pt):
                         hb = (i, fitz.Rect(b["bbox"]))
                         break
@@ -786,7 +820,7 @@ class PageView(QGraphicsView):
 
     def _select_block_or_image(self, i: int, sp: QPointF) -> bool:
         pt = self.to_page(i, sp)
-        for b in self.doc.text_blocks(i):
+        for b in self.blocks(i):
             if fitz.Rect(b["bbox"]).contains(pt):
                 if b.get("type") == 0:
                     text = "\n".join("".join(s["text"] for s in l["spans"]) for l in b["lines"])
@@ -1064,7 +1098,7 @@ class PageView(QGraphicsView):
         if self.edit_mode:
             p.setPen(QPen(QColor(120, 120, 220, 160), 1, Qt.PenStyle.DashLine))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            for b in self.doc.text_blocks(i):
+            for b in self.blocks(i):
                 p.drawRect(self.from_page_rect(i, fitz.Rect(b["bbox"])))
             if self._hover_block and self._hover_block[0] == i:
                 p.setPen(QPen(accent, 1.5))

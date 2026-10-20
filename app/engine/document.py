@@ -108,6 +108,7 @@ class SearchHit:
     rect: fitz.Rect          # 첫 줄 자리
     text: str
     rects: list[fitz.Rect] = field(default_factory=list)  # 줄을 건너면 줄마다 하나
+    context: str = ""        # 찾은 글자 앞뒤(결과 목록에 보임)
 
     def all_rects(self) -> list[fitz.Rect]:
         return self.rects or [self.rect]
@@ -122,21 +123,32 @@ def search_pattern(needle: str, regex: bool = False, case: bool = False, whole_w
     return re.compile(pat, 0 if case else re.IGNORECASE)
 
 
+# 글자만 읽는 flags. get_text("dict"/"rawdict") 의 기본값은 그림 데이터까지 뽑아, 수식 그림이 많은 한글 PDF 쪽은
+# 한 쪽에 80~130ms 가 들었다(그림을 빼면 2~5ms, 10-20 측정).
+TEXT_ONLY = fitz.TEXTFLAGS_RAWDICT & ~fitz.TEXT_PRESERVE_IMAGES
+
+
 def find_text(page: fitz.Page, rx: re.Pattern) -> list[tuple[str, list[fitz.Rect]]]:
     """쪽 글자에서 찾는다. 한 건 = (찾은 글자, 줄마다 네모). 줄은 띄어쓰기 하나로 이어 붙여 줄을 건너는 글도 한 건으로 잡는다.
     search_for 는 줄을 건너면 줄마다 따로 돌려줘 한 건이 두 건이 되고, 바꾸기가 두 번 들어갔다."""
-    if not rx.search(" ".join(page.get_text("text").split())):
+    return [(t, rs) for t, rs, _ in find_text_ctx(page, rx)]
+
+
+def find_text_ctx(page: fitz.Page, rx: re.Pattern, around: int = 30) -> list[tuple[str, list[fitz.Rect], str]]:
+    """find_text 에 앞뒤 글자를 붙인 것. 결과 목록용 앞뒤 글자를 건마다 get_textbox 로 뽑으면 건당 40ms 가 들었다."""
+    tp = page.get_textpage(flags=TEXT_ONLY)
+    if not rx.search(" ".join(page.get_text("text", textpage=tp).split())):
         return []
     chars: list[str] = []
-    where: list[tuple[int, fitz.Rect] | None] = []
+    where: list[tuple[int, tuple] | None] = []   # 글자 자리는 튜플로 둔다(글자마다 fitz.Rect 를 만들면 쪽마다 수천 번)
     line_no = 0
-    for b in page.get_text("rawdict")["blocks"]:
+    for b in page.get_text("rawdict", textpage=tp)["blocks"]:
         for ln in b.get("lines", []):
             if chars:
                 chars.append(" "); where.append(None)
             for sp in ln["spans"]:
                 for ch in sp["chars"]:
-                    chars.append(ch["c"]); where.append((line_no, fitz.Rect(ch["bbox"])))
+                    chars.append(ch["c"]); where.append((line_no, ch["bbox"]))
             line_no += 1
     text = "".join(chars)
     out = []
@@ -147,9 +159,10 @@ def find_text(page: fitz.Page, rx: re.Pattern) -> list[tuple[str, list[fitz.Rect
         for k in range(m.start(), m.end()):
             if where[k] is not None:
                 n, r = where[k]
-                lines[n] = lines[n] | r if n in lines else fitz.Rect(r)
+                lines[n] = lines[n] | fitz.Rect(r) if n in lines else fitz.Rect(r)
         if lines:
-            out.append((m.group(0), [lines[n] for n in sorted(lines)]))
+            ctx = text[max(0, m.start() - around):m.end() + around]
+            out.append((m.group(0), [lines[n] for n in sorted(lines)], " ".join(ctx.split())))
     return out
 
 
@@ -311,8 +324,9 @@ class Document:
                     self.fitz.subset_fonts()  # 글자 하나만 넣어도 맑은 고딕 통째(7MB 넘게)가 실리지 않게
                 except Exception:  # noqa: BLE001
                     pass
-                # 열 때의 암호·권한을 그대로 둔다(그냥 저장하면 암호가 풀린다)
-                self.fitz.save(tmp, garbage=3, deflate=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+                # 열 때의 암호·권한을 그대로 둔다(그냥 저장하면 암호가 풀린다).
+                # garbage=3(같은 객체 합치기)은 스캔 376쪽에서 1.3초 걸리고 크기는 0.04% 줄 뿐이라 2(안 쓰는 것 지우고 번호 다시 매김)로
+                self.fitz.save(tmp, garbage=2, deflate=True, encryption=fitz.PDF_ENCRYPT_KEEP)
                 # 저장 뒤에도 계속 편집할 수 있게 다시 연다
                 with open(tmp, "rb") as f:
                     data = f.read()
@@ -397,8 +411,13 @@ class Document:
             return self.fitz[i].get_textbox(rect)
 
     def text_blocks(self, i: int) -> list[dict]:
+        """글자 덩어리(type 0)와 그림 자리(type 1, bbox 만). 그림 데이터까지 뽑는 기본 flags 는 한 쪽에 75ms 가 들어
+        편집 모드에서 마우스를 움직일 때마다 끊겼다. 그림 자리는 get_image_info 로 따로 받는다."""
         with self.lock:
-            return self.fitz[i].get_text("dict")["blocks"]
+            page = self.fitz[i]
+            blocks = page.get_text("dict", flags=fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES)["blocks"]
+            blocks += [{"type": 1, "bbox": tuple(im["bbox"])} for im in page.get_image_info()]
+            return blocks
 
     def has_text(self, i: int) -> bool:
         return bool(self.text(i).strip())
@@ -412,12 +431,12 @@ class Document:
         rng = list(pages) if pages is not None else range(self.page_count)
         total = len(rng)
         rx = search_pattern(needle, case=case, whole_word=whole_word)
-        with self.lock:
-            for n, i in enumerate(rng):
-                for text, rects in find_text(self.fitz[i], rx):
-                    hits.append(SearchHit(i, rects[0], text, rects))
-                if progress:
-                    progress(n + 1, total)
+        for n, i in enumerate(rng):
+            with self.lock:  # 쪽마다 잡는다(일꾼에서 찾는 동안에도 화면 그리기가 사이사이 들어오게)
+                for text, rects, ctx in find_text_ctx(self.fitz[i], rx):
+                    hits.append(SearchHit(i, rects[0], text, rects, ctx))
+            if progress:
+                progress(n + 1, total)
         return hits
 
     def replace_text(self, hits: list[SearchHit], replacement: str, fontsize: float | None = None) -> int:

@@ -18,9 +18,9 @@ def main():
     win.open_path(work)
     t = win.cur(); v = t.viewer
     B.wait(lambda: B.rendered(v), 30)
-    B.wait(lambda: not (t.thumbs.worker.isRunning() or t.organize.worker.isRunning()), 120)
+    B.wait(lambda: not (t.thumbs.thumbs.busy() or t.organize.thumbs.busy()), 120)
     refs = {"DocTab": weakref.ref(t), "PageView": weakref.ref(v), "Document": weakref.ref(t.doc),
-            "RenderWorker": weakref.ref(v.worker), "ThumbWorker": weakref.ref(t.thumbs.worker)}
+            "RenderWorker": weakref.ref(v.worker), "ThumbWorker": weakref.ref(t.thumbs.thumbs.worker)}
     fz = t.doc.fitz
     win.close_tab(0)
     del t, v

@@ -37,10 +37,8 @@ def main():
     work = docs.path(name)
     prof("열기(open_path)", lambda: win.open_path(work))
     t = win.cur(); v = t.viewer
-    th = t.thumbs.worker; og = t.organize.worker
-    print("썸네일 일꾼 돌고 있나", th.isRunning(), "남은", len(th.todo), "/ 구성 일꾼", og.isRunning(), "남은", len(og.todo))
     t0 = time.perf_counter()
-    B.wait(lambda: not th.isRunning() and not og.isRunning(), 300)
+    B.wait(lambda: not (t.thumbs.thumbs.busy() or t.organize.thumbs.busy()), 300)
     print(f"썸네일·구성 일꾼 다 끝남: 열고 나서 {time.perf_counter() - t0:.1f}s 더")
     B.wait(lambda: B.rendered(v), 20)
     from app.engine import annots as A
@@ -48,7 +46,7 @@ def main():
     A.rect(t.doc, 0, fitz.Rect(72, 72, 200, 150), (1, 0, 0), None, 1.5, 1.0, ""); t.changed([0])
     B.pump(0.3)
     prof("되돌리기(undo)", lambda: win.on_action("undo"))
-    B.wait(lambda: not t.thumbs.worker.isRunning(), 300)
+    B.wait(lambda: not t.thumbs.thumbs.busy(), 300)
     prof("회전(pages_action rotate_right)", lambda: win.pages_action("rotate_right", [0]))
     t.doc.modified = False
     win.close_tab(0)

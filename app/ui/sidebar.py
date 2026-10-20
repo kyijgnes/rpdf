@@ -1,8 +1,11 @@
 """왼쪽 패널: 썸네일 · 북마크 · 주석 목록 · 첨부 파일 · 검색 · 레이어 · (양식 칸 · 서명)."""
 from __future__ import annotations
 
+import queue
+import time
+
 import fitz
-from PySide6.QtCore import QRectF, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton,
@@ -50,29 +53,131 @@ def _tidy_tree(tree: QTreeWidget, stretch: int):
 
 
 class ThumbWorker(QThread):
-    done = Signal(int, QImage)
+    """부탁받은 쪽만 그리는 일꾼(나중에 부탁한 것부터). PyMuPDF 는 그리는 동안 GIL 을 놓지 않아
+    전 쪽을 한꺼번에 그리면 화면이 그만큼 멈춘다(959쪽 열기 3.6초, 10-20 측정). 그래서 보이는 칸만 부탁받는다."""
+    done = Signal(int, QImage, int)  # 쪽, 그림, 세대
 
     def __init__(self, doc: Document, width: int, dpr: float = 1.0):
         super().__init__()
         self.doc = doc
         self.width = int(width * dpr)
         self.dpr = dpr
-        self.todo: list[int] = []
+        self.q: "queue.LifoQueue[tuple[int, int]]" = queue.LifoQueue()
+        self.gen = 0
         self._stop = False
 
-    def run(self):
-        while not self._stop and self.todo:
-            i = self.todo.pop(0)
+    def request(self, i: int):
+        self.q.put((i, self.gen))
+
+    def drop_queue(self):
+        """아직 안 그린 부탁을 버린다(화면을 옮겨 안 보이게 된 칸)."""
+        while True:
             try:
-                r = self.doc.fitz[i].rect
-                z = self.width / max(1, r.width)
-                pix = self.doc.render(i, z)
-                fmt = QImage.Format.Format_RGB888
-                img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt).copy()
+                self.q.get_nowait()
+            except queue.Empty:
+                return
+
+    def stop(self):
+        self._stop = True
+        self.drop_queue()
+        self.q.put((-1, -1))
+        self.wait(2000)
+
+    def run(self):
+        while not self._stop:
+            i, gen = self.q.get()
+            if i < 0 or self._stop:
+                break
+            if gen != self.gen:
+                continue
+            try:
+                w, _ = self.doc.page_size(i)
+                pix = self.doc.render(i, self.width / max(1, w))
+                img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
                 img.setDevicePixelRatio(self.dpr)
-                self.done.emit(i, img)
+                self.done.emit(i, img, gen)
             except Exception:  # noqa: BLE001
                 pass
+            time.sleep(0.002)  # 한 장마다 GIL 을 놓아 화면이 숨 쉬게
+
+
+class LazyThumbs:
+    """PageGrid 의 썸네일을 보이는 칸(과 그 아래 한 화면)만 그려 채운다. 숨은 목록은 그리지 않는다."""
+    AHEAD = 1.0  # 보이는 칸 아래로 화면 몇 개만큼 미리
+
+    def __init__(self, grid: "PageGrid", doc: Document):
+        self.grid, self.doc = grid, doc
+        self.worker: ThumbWorker | None = None
+        self.have: set[int] = set()      # 다 그린 쪽
+        self.asked: set[int] = set()     # 부탁해 둔 쪽
+        self.timer = QTimer(grid); self.timer.setSingleShot(True); self.timer.timeout.connect(self._ask)
+        grid.verticalScrollBar().valueChanged.connect(self.kick)
+        grid.shown.connect(self.kick)
+
+    def start(self, width: int, dpr: float):
+        self.stop()
+        self.have.clear(); self.asked.clear()
+        self.worker = ThumbWorker(self.doc, width, dpr)
+        self.worker.done.connect(self._done)
+        self.worker.start()
+        self.kick()
+
+    def stop(self):
+        if self.worker is not None:
+            self.worker.stop()
+            self.worker = None
+
+    def forget(self, pages=None):
+        """이 쪽들은 다시 그린다(옛 그림은 새 그림이 올 때까지 둔다)."""
+        if self.worker is None:
+            return
+        # 그리던 그림은 옛 문서 것이라 버린다(세대를 올림). 부탁해 둔 것도 다시 부탁한다
+        self.worker.gen += 1; self.worker.drop_queue(); self.asked.clear()
+        if pages is None:
+            self.have.clear()
+        else:
+            self.have.difference_update(pages)
+        self.kick()
+
+    def busy(self) -> bool:
+        return bool(self.asked - self.have)
+
+    def kick(self, *_):
+        self.timer.start(30)
+
+    def _visible_rows(self) -> list[int]:
+        g = self.grid
+        vp = g.viewport().rect()
+        vp.setBottom(int(vp.bottom() + vp.height() * self.AHEAD))
+        first = g.indexAt(vp.topLeft() + QPoint(4, 4)).row()
+        rows = []
+        for k in range(max(0, first), g.count()):
+            r = g.visualItemRect(g.item(k))
+            if r.top() > vp.bottom():
+                break
+            if r.intersects(vp):
+                rows.append(k)
+        return rows
+
+    def _ask(self):
+        if self.worker is None or not self.grid.isVisible():
+            return
+        self.worker.drop_queue()
+        self.asked &= self.have           # 버린 부탁은 다시 부탁할 수 있게
+        want = [self.grid.item(k).data(Qt.ItemDataRole.UserRole) for k in self._visible_rows()]
+        for p in reversed(want):          # 나중에 부탁한 것부터 그리니 위 칸이 먼저 나온다
+            if p not in self.have and p not in self.asked:
+                self.asked.add(p)
+                self.worker.request(p)
+
+    def _done(self, i: int, img: QImage, gen: int):
+        if self.worker is None or gen != self.worker.gen:
+            return
+        self.have.add(i)
+        if i < self.grid.count():
+            it = self.grid.item(i)
+            if it.data(Qt.ItemDataRole.UserRole) == i:
+                it.setData(ThumbDelegate.PIX, QPixmap.fromImage(img))
 
 
 class ThumbDelegate(QStyledItemDelegate):
@@ -115,6 +220,15 @@ class PageGrid(QListWidget):
     IconMode 는 Qt 가 놓을 자리를 받지 않아 끌어도 아무 일이 없다(10-19 진짜 끌기로 확인).
     그래서 ListMode 를 왼→오 흐름·줄바꿈으로 격자처럼 쓴다."""
     reordered = Signal(list)
+    shown = Signal()  # 보이게 됐거나 크기가 바뀜(그릴 칸이 달라짐)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.shown.emit()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.shown.emit()
 
     def __init__(self, spacing: int, parent=None):
         super().__init__(parent)
@@ -142,6 +256,25 @@ class PageGrid(QListWidget):
             self.reordered.emit(order)
 
 
+def fill_grid(grid: PageGrid, doc: Document, thumb_w: int, pad_w: int, pad_h: int):
+    """쪽마다 빈 흰 칸을 놓는다(그림은 LazyThumbs 가 보이는 칸부터 채움)."""
+    grid.setUpdatesEnabled(False)
+    grid.clear()
+    labels = P.labels(doc)
+    blank: dict[int, QPixmap] = {}   # 쪽 크기가 같으면 빈 그림 하나를 같이 쓴다
+    for i in range(doc.page_count):
+        w, hh = doc.page_size(i)
+        h = int(thumb_w * hh / max(1, w))
+        if h not in blank:
+            pm = QPixmap(thumb_w, h); pm.fill(Qt.GlobalColor.white); blank[h] = pm
+        it = QListWidgetItem(labels[i])
+        it.setData(Qt.ItemDataRole.UserRole, i)
+        it.setData(ThumbDelegate.PIX, blank[h])
+        it.setSizeHint(QSize(thumb_w + pad_w, h + pad_h))
+        grid.addItem(it)
+    grid.setUpdatesEnabled(True)
+
+
 class ThumbnailPanel(QWidget):
     """썸네일: 눌러 이동, 끌어 순서 바꾸기, 오른쪽 클릭 메뉴."""
     pageClicked = Signal(int)
@@ -163,7 +296,7 @@ class ThumbnailPanel(QWidget):
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._menu)
         lay.addWidget(self.list)
-        self.worker: ThumbWorker | None = None
+        self.thumbs = LazyThumbs(self.list, doc)
         self.reload()
 
     def set_width(self, w: int):
@@ -174,37 +307,11 @@ class ThumbnailPanel(QWidget):
         return sorted(it.data(Qt.ItemDataRole.UserRole) for it in self.list.selectedItems())
 
     def reload(self):
-        if self.worker and self.worker.isRunning():
-            self.worker._stop = True
-            self.worker.wait(1000)
-        self.list.clear()
-        labels = P.labels(self.doc)
-        for i in range(self.doc.page_count):
-            r = self.doc.fitz[i].rect
-            h = int(self.thumb_w * r.height / max(1, r.width))
-            pm = QPixmap(self.thumb_w, h); pm.fill(Qt.GlobalColor.white)
-            it = QListWidgetItem(labels[i])
-            it.setData(Qt.ItemDataRole.UserRole, i)
-            it.setData(ThumbDelegate.PIX, pm)
-            it.setSizeHint(QSize(self.thumb_w + 16, h + 34))
-            self.list.addItem(it)
-        self.worker = ThumbWorker(self.doc, self.thumb_w, self.devicePixelRatioF())
-        self.worker.todo = list(range(self.doc.page_count))
-        self.worker.done.connect(self._thumb)
-        self.worker.start()
+        fill_grid(self.list, self.doc, self.thumb_w, 16, 34)
+        self.thumbs.start(self.thumb_w, self.devicePixelRatioF())
 
     def refresh_pages(self, pages: list[int] | None):
-        if self.worker and self.worker.isRunning():
-            self.worker.todo.extend(pages or range(self.doc.page_count))
-        else:
-            self.worker = ThumbWorker(self.doc, self.thumb_w, self.devicePixelRatioF())
-            self.worker.todo = list(pages or range(self.doc.page_count))
-            self.worker.done.connect(self._thumb)
-            self.worker.start()
-
-    def _thumb(self, i: int, img: QImage):
-        if i < self.list.count():
-            self.list.item(i).setData(ThumbDelegate.PIX, QPixmap.fromImage(img))
+        self.thumbs.forget(pages)
 
     def set_current(self, i: int):
         if 0 <= i < self.list.count():
@@ -228,9 +335,7 @@ class ThumbnailPanel(QWidget):
         m.exec(self.list.mapToGlobal(pos))
 
     def close(self):
-        if self.worker and self.worker.isRunning():
-            self.worker._stop = True
-            self.worker.wait(1000)
+        self.thumbs.stop()
 
 
 class BookmarkPanel(QWidget):
@@ -468,6 +573,8 @@ class SearchPanel(QWidget):
         self.hits = []       # [(쪽, [줄마다 네모])]
         self.results = []    # SearchHit
         self.current = -1
+        self._gen = 0                      # 찾기를 새로 하면 옛 일꾼 결과는 버린다
+        self._workers: list[QThread] = []
         outer = QVBoxLayout(self); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
         outer.addWidget(panel_head("검색"))
         lay = QVBoxLayout(); lay.setContentsMargins(10, 10, 10, 8); lay.setSpacing(8); outer.addLayout(lay)
@@ -493,6 +600,7 @@ class SearchPanel(QWidget):
         rb = QPushButton("모두 바꾸기"); rb.clicked.connect(self.replace_all); rrow.addWidget(rb)
         lay.addLayout(rrow)
         self.list = QListWidget(); self.list.itemClicked.connect(self._pick)
+        self.list.setUniformItemSizes(True)  # 한 줄 글이라 칸 높이가 같다. 안 두면 결과 300건에 칸 재기만 0.24초
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list.setTextElideMode(Qt.TextElideMode.ElideRight)
         outer.addWidget(self.list)
@@ -500,18 +608,33 @@ class SearchPanel(QWidget):
     def focus(self):
         self.edit.setFocus(); self.edit.selectAll()
 
-    def run(self):
+    BG_PAGES = 60  # 이보다 큰 문서는 일꾼에서 찾는다(959쪽은 글자 뽑기만 0.9초)
+
+    def run(self, sync: bool = False):
         q = self.edit.text()
         self.list.clear()
-        self.hits = []
+        self.hits = []; self.results = []
+        self._gen += 1
         if not q:
             self.count.setText(""); self.hitsChanged.emit([], -1); return
-        res = self.doc.search(q, case=self.case.isChecked(), whole_word=self.whole.isChecked())
+        args = (q, self.case.isChecked(), self.whole.isChecked())
+        if sync or self.doc.page_count <= self.BG_PAGES:
+            self._show(self.doc.search(args[0], case=args[1], whole_word=args[2]))
+            return
+        self.count.setText("찾는 중")
+        w = _SearchWorker(self.doc, *args)
+        w.found.connect(lambda res, g=self._gen: self._show(res) if g == self._gen else None)
+        w.finished.connect(lambda: self._workers.remove(w) if w in self._workers else None)
+        self._workers.append(w)
+        w.start()
+
+    def _show(self, res):
         self.results = res
         self.hits = [(h.page, h.all_rects()) for h in res]
+        self.list.setUpdatesEnabled(False)
         for h in res:
-            ctx = self.doc.text_in_rect(h.page, fitz.Rect(h.rect.x0 - 80, h.rect.y0 - 2, h.rect.x1 + 80, h.rect.y1 + 2))
-            self.list.addItem(f"{h.page + 1}쪽   {ctx.strip().replace(chr(10), ' ')[:60]}")
+            self.list.addItem(f"{h.page + 1}쪽   {h.context[:60]}")
+        self.list.setUpdatesEnabled(True)
         self.current = 0 if self.hits else -1
         self.count.setText(f"{len(self.hits)}개" if self.hits else "없음")
         if self.hits:
@@ -531,13 +654,41 @@ class SearchPanel(QWidget):
 
     def replace_all(self):
         if not self.hits:
-            self.run()
+            self.run(sync=True)
         if not self.hits:
             return
         n = self.doc.replace_text(self.results, self.repl.text())
         QMessageBox.information(self, "바꾸기", f"{n}곳을 바꿨습니다")
         self.replaced.emit()
         self.run()
+
+    def close(self):
+        self._gen += 1
+        for w in list(self._workers):
+            w.wait(3000)
+
+
+class _SearchWorker(QThread):
+    found = Signal(object)
+
+    def __init__(self, doc: Document, q: str, case: bool, whole: bool):
+        super().__init__()
+        self.doc, self.args = doc, (q, case, whole)
+
+    def run(self):
+        last = [time.perf_counter()]
+
+        def breathe(*_):
+            # 그냥 두면 처음 찾을 때 이 스레드가 GIL 을 끝까지 쥐어 화면이 0.8초 멈췄다(959쪽).
+            # 20ms 마다 1ms 씩 놓아 준다(쪽마다 놓으면 찾는 시간이 두 배)
+            if time.perf_counter() - last[0] > 0.02:
+                time.sleep(0.001)
+                last[0] = time.perf_counter()
+        try:
+            res = self.doc.search(self.args[0], case=self.args[1], whole_word=self.args[2], progress=breathe)
+        except Exception:  # noqa: BLE001  찾는 사이 문서가 닫혔다
+            return
+        self.found.emit(res)
 
 
 class LayerPanel(QWidget):
