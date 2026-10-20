@@ -67,7 +67,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            release/PDFEditor-setup-${{ steps.ver.outputs.version }}.exe
+            release/RPDF-setup-${{ steps.ver.outputs.version }}.exe
             release/latest.json
           generate_release_notes: false
           body: ""

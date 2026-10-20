@@ -1,4 +1,4 @@
-"""설치 프로그램(Inno Setup) 만들기: build.py 가 지은 dist\\<APP_ID> → release\\<버전>\\PDFEditor-setup-<버전>.exe + latest.json
+"""설치 프로그램(Inno Setup) 만들기: build.py 가 지은 dist\\<APP_ID> → release\\<버전>\\RPDF-setup-<버전>.exe + latest.json
 
     python make_setup.py                 이 폴더의 dist 로(GitHub Actions 가 부른다)
     python make_setup.py --root <폴더>   그 폴더의 dist·installer 로(release.py --build-only 가 HEAD 사본으로 부른다)
@@ -23,12 +23,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from app.updater import MUTEX_NAME, RELEASE_REPO  # noqa: E402
 
-# ── 바꾸지 않는 열쇠. 앱 이름을 바꿔도 그대로 둬야 같은 앱으로 이어진다(바꾸면 따로 깔린다) ──
+# ── 바꾸지 않는 열쇠. 바꾸면 같은 앱으로 이어지지 않고 따로 깔린다 ──
 INNO_GUID = "A5A02529-0CA9-4430-A2AD-3140C6CEEFAC"   # 설치 정보(설정 > 앱) 열쇠
-PROGID = "PDFEditor.kyijgnes.Document"               # .pdf 연결. 10-19 손 설치 때 정한 것
-REG_KEY = r"Software\kyijgnes\PDFEditor"             # 기본 앱 목록(Capabilities) 자리
-REG_APP = "PDFEditor.kyijgnes"                       # RegisteredApplications 값 이름
-ASSET = "PDFEditor"                                  # GitHub 에 올리는 파일 이름(한글 이름은 GitHub 이 바꿔 버린다)
+
+# ── 이름들. 10-20 옛 이름 PDFEditor 를 RPDF 로 통일(0.1.4). 옛 이름은 설치 프로그램이 걷는다(OLD_*) ──
+PROGID = "RPDF.kyijgnes.Document"                    # .pdf 연결
+REG_KEY = r"Software\kyijgnes\RPDF"                  # 기본 앱 목록(Capabilities) 자리
+REG_APP = "RPDF.kyijgnes"                            # RegisteredApplications 값 이름
+ASSET = "RPDF"                                       # GitHub 에 올리는 파일 이름(영어로. 한글 이름은 GitHub 이 바꿔 버린다)
+OLD_PROGID = "PDFEditor.kyijgnes.Document"           # 0.1.0~0.1.3 이 쓰던 이름들
+OLD_REG_KEY = r"Software\kyijgnes\PDFEditor"
+OLD_REG_APP = "PDFEditor.kyijgnes"
+OLD_MUTEX = "PDFEditor.kyijgnes.Running"             # 0.1.3 이하에서 업데이트할 때 그 앱이 꺼지기를 기다리려고
 LEGACY_ID = "PDF편집기"                              # 10-19 손 설치(dist 를 가리키던 바로 가기·Software\PDF편집기)를 걷을 때
 
 
@@ -70,6 +76,7 @@ def make_setup(root: str, out: str | None = None) -> str:
         "AppName": info["APP_NAME"], "AppIdName": info["APP_ID"], "AppVersion": version, "Org": info["ORG"],
         "AppGuid": INNO_GUID, "ProgId": PROGID, "RegKey": REG_KEY, "RegKeyParent": REG_KEY.rsplit("\\", 1)[0],
         "RegAppName": REG_APP, "AppMutex": MUTEX_NAME, "LegacyId": LEGACY_ID,
+        "OldProgId": OLD_PROGID, "OldRegKey": OLD_REG_KEY, "OldRegApp": OLD_REG_APP, "OldMutex": OLD_MUTEX,
         "SourceDir": dist, "OutputDir": out, "OutputBase": setup_name(version)[:-4],
     }
     icon = os.path.join(root, "assets", "app.ico")

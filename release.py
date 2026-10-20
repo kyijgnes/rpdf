@@ -37,7 +37,7 @@ sys.path.insert(0, HERE)
 from app.updater import LATEST_URL, RELEASE_REPO, parse_version  # noqa: E402
 
 WORKFLOW = "release.yml"
-WORK = os.path.join(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "Temp", "PDFEditor_release")
+WORK = os.path.join(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "Temp", "RPDF_release")
 SRC = os.path.join(WORK, "src")
 APPINFO = os.path.join("app", "appinfo.py")
 VERSION_RE = re.compile(r'^(VERSION\s*=\s*")([^"]*)(")', re.M)

@@ -24,13 +24,13 @@ from .appinfo import VERSION
 
 RELEASE_REPO = "kyijgnes/rpdf"   # 10-20 pdf-app-releases 에서 이름을 바꿈(옛 주소는 GitHub 이 넘겨 주어 0.1.0 도 여기를 찾는다)
 LATEST_URL = f"https://github.com/{RELEASE_REPO}/releases/latest/download/latest.json"
-MUTEX_NAME = "PDFEditor.kyijgnes.Running"   # setup 이 앱이 켜져 있는지 보는 이름(make_setup.py 가 setup.iss 에 넘긴다)
+MUTEX_NAME = "RPDF.kyijgnes.Running"          # setup 이 앱이 켜져 있는지 보는 이름(make_setup.py 가 setup.iss 에 넘긴다)
 SOURCE_ENV = "PDFAPP_UPDATE_SOURCE"
 AFTER_FLAG = "--after-update"               # setup 이 업데이트 뒤 다시 켤 때 붙인다
 REOPEN_KEY = "reopen_after_update"          # settings.json: 업데이트 직전에 열려 있던 문서
-_UA = {"User-Agent": f"PDFEditor-updater/{VERSION}"}   # 머리말은 latin-1 만 된다(앱 이름이 한글이라 쓰지 않음)
+_UA = {"User-Agent": f"RPDF-updater/{VERSION}"}   # 머리말은 latin-1 만 된다
 # 받은 setup 은 내 사용자 폴더에만(TEMP 가 C:\Users\Public 아래로 잡힌 PC 가 있다. 남이 바꿔 끼울 수 있는 자리에서 실행하지 않게)
-_DOWNLOAD_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "Temp", "PDFEditor-update")
+_DOWNLOAD_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "Temp", "RPDF-update")
 _mutex = None
 
 

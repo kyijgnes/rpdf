@@ -1,6 +1,6 @@
 ﻿; PDF 앱 설치 프로그램(Inno Setup 6). **make_setup.py 로 만든다**(GitHub Actions 가 부름).
 ; 이름·버전·경로는 make_setup.py 가 옆에 적는 defs.iss 에서 온다(이름은 app/appinfo.py 한 곳이라 여기에 박지 않는다).
-; 바꾸지 않는 열쇠(AppGuid·ProgId·RegKey·AppMutex·LegacyId)는 make_setup.py 머리에 있다.
+; 바꾸지 않는 열쇠(AppGuid)와 이름들(ProgId·RegKey·AppMutex, 옛 이름 Old*·LegacyId)은 make_setup.py 머리에 있다.
 ;
 ; 하는 일: %LOCALAPPDATA%\Programs\<APP_ID> 에 관리자 권한 없이 설치, 시작 메뉴·바탕화면 바로 가기,
 ; .pdf 「연결 프로그램」 등록(기본 앱은 사람이 윈도우 설정에서 고른다), 설정 > 앱 의 제거.
@@ -44,7 +44,7 @@ RestartApplications=no
 ChangesAssociations=yes
 ShowLanguageDialog=no
 SetupMutex={#AppMutex}.Setup
-; %TEMP%\Setup Log <날짜> #<번호>.txt (앱 안 업데이트는 %LOCALAPPDATA%\Temp\PDFEditor-update\setup.log)
+; %TEMP%\Setup Log <날짜> #<번호>.txt (앱 안 업데이트는 %LOCALAPPDATA%\Temp\RPDF-update\setup.log)
 SetupLogging=yes
 
 [Languages]
@@ -167,11 +167,11 @@ begin
   if Waiting then
     for i := 1 to 40 do
     begin
-      if not CheckForMutexes('{#AppMutex}') then
+      if not CheckForMutexes('{#AppMutex},{#OldMutex}') then
         Break;
       Sleep(500);
     end;
-  while CheckForMutexes('{#AppMutex}') do
+  while CheckForMutexes('{#AppMutex},{#OldMutex}') do
     if MsgBox('{#AppName} 창이 켜져 있습니다.' + #13#10 + '문서를 저장하고 창을 모두 닫은 뒤 [다시 시도]를 누르세요.',
               mbError, MB_RETRYCANCEL) = IDCANCEL then
     begin
@@ -291,6 +291,13 @@ begin
       RegDeleteKeyIncludingSubkeys(HKCU, 'Software\{#LegacyId}\Capabilities');
       RegDeleteKeyIfEmpty(HKCU, 'Software\{#LegacyId}');
     end;
+    // 0.1.3 까지 쓰던 이름(PDFEditor…)으로 등록한 것. 10-20 에 RPDF… 로 통일
+    if RegQueryStringValue(HKCU, 'Software\Classes\.pdf', '', V) and (CompareText(V, '{#OldProgId}') = 0) then
+      RegDeleteValue(HKCU, 'Software\Classes\.pdf', '');
+    RegDeleteValue(HKCU, 'Software\Classes\.pdf\OpenWithProgids', '{#OldProgId}');
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\{#OldProgId}');
+    RegDeleteValue(HKCU, 'Software\RegisteredApplications', '{#OldRegApp}');
+    RegDeleteKeyIncludingSubkeys(HKCU, '{#OldRegKey}');
     DropOldDir();
   end;
 end;

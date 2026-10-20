@@ -6,7 +6,7 @@
 
 **[👉 최신 버전 받기 (Releases)](https://github.com/kyijgnes/rpdf/releases/latest)**
 
-- 💻 **Windows** · `PDFEditor-setup-*.exe` 를 받아 실행 (관리자 권한 필요 없음)
+- 💻 **Windows** · `RPDF-setup-*.exe` 를 받아 실행 (관리자 권한 필요 없음)
 
 > 처음 실행할 때 「Windows의 PC 보호」 창이 뜨면 **추가 정보 > 실행**.
 
