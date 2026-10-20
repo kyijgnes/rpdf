@@ -25,7 +25,7 @@ class PropsPanel(QWidget):
         outer.addWidget(panel_head("속성"))
         # 옅은 회색 바탕 위에 쓰임새별 흰 카드. 창이 낮으면 스크롤
         body = QWidget(); body.setObjectName("propbody")
-        lay = QVBoxLayout(body); lay.setContentsMargins(8, 10, 8, 12); lay.setSpacing(10)
+        lay = QVBoxLayout(body); lay.setContentsMargins(8, 6, 8, 8); lay.setSpacing(6)
         scroll = QScrollArea(); scroll.setWidget(body); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet("QScrollArea, QWidget#propbody { background: transparent; }")
@@ -54,12 +54,24 @@ class PropsPanel(QWidget):
         self.apply_btn.clicked.connect(self._apply); lay.addWidget(self.apply_btn)
         self.del_btn = QPushButton("고른 주석 삭제"); self.del_btn.clicked.connect(self.deleteSel.emit); lay.addWidget(self.del_btn)
         lay.addStretch()
+        self._align_labels(body)
         for w, sig in ((self.stroke, "clicked"), (self.fill, "clicked"), (self.hl, "clicked"), (self.ink_color, "clicked")):
             getattr(w, sig).connect(self._emit)
         self.width.valueChanged.connect(self._emit); self.opacity.valueChanged.connect(self._emit)
         self.fontsize.valueChanged.connect(self._emit); self.ink_width.valueChanged.connect(self._emit)
         self.stamp_text.currentTextChanged.connect(self._emit); self.unit.currentTextChanged.connect(self._emit)
         self.show_selection(None)
+
+    @staticmethod
+    def _align_labels(body: QWidget):
+        """카드마다 이름 칸 폭이 달라 입력칸이 들쭉날쭉하던 것을 가장 긴 이름에 맞춘다."""
+        labels = [f.labelForField(f.itemAt(i, QFormLayout.ItemRole.FieldRole).widget())
+                  for f in body.findChildren(QFormLayout) for i in range(f.rowCount())
+                  if f.itemAt(i, QFormLayout.ItemRole.FieldRole)]
+        labels = [l for l in labels if l is not None]
+        w = max((l.sizeHint().width() for l in labels), default=0)
+        for l in labels:
+            l.setMinimumWidth(w)
 
     def _emit(self, *_):
         d = {"stroke": self.stroke.color, "fill": self.fill.color, "hl_color": self.hl.color or (1, 1, 0),

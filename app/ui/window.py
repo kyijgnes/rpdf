@@ -339,7 +339,7 @@ class MainWindow(QMainWindow):
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal); self.zoom_slider.setRange(10, 800); self.zoom_slider.setFixedWidth(110)
         self.zoom_slider.sliderMoved.connect(lambda v: self.cur() and self.cur().viewer.set_zoom(v / 100)); sl.addWidget(self.zoom_slider)
         zi = QToolButton(); zi.setObjectName("quick"); zi.setIcon(icons.icon("zoomin", 14)); zi.clicked.connect(lambda: self.on_action("zoomin")); sl.addWidget(zi)
-        self.zoom_box = QComboBox(); self.zoom_box.setEditable(True); self.zoom_box.setFixedWidth(84)
+        self.zoom_box = QComboBox(); self.zoom_box.setEditable(True); self.zoom_box.setFixedWidth(92)
         self.zoom_box.addItems(["50%", "75%", "100%", "125%", "150%", "200%", "300%", "400%", "창 너비", "창 크기", "실제 크기"])
         self.zoom_box.activated.connect(self._zoom_box); self.zoom_box.lineEdit().returnPressed.connect(self._zoom_box)
         sl.addWidget(self.zoom_box)

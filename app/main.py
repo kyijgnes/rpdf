@@ -31,7 +31,8 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(ORG)
     app.setApplicationVersion(VERSION)
-    app.setFont(QFont("Malgun Gothic", 9))
+    from .ui import theme
+    f = QFont(theme.FONT); f.setPointSizeF(theme.FONT_PT); app.setFont(f)
     from . import single
     alone = bool(os.environ.get("PDFAPP_SHOT"))   # 화면 찍기 확인은 켜져 있는 창과 상관없이
     first = alone or single.claim_first()
