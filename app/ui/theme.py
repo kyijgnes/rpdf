@@ -99,8 +99,35 @@ def qss(dark: bool = False) -> str:
     QFrame#group {{ background: {c['CARD']}; border: 1px solid {c['CARD_LINE']}; border-radius: 8px; }}
     QFrame#group QLabel {{ background: transparent; }}
     QLabel#grouptitle {{ font-weight: bold; color: {c['TEXT']}; padding: 0 0 2px 0; }}
-    QWidget#printleft {{ background: {c['CANVAS']}; }}
-    QWidget#printright {{ background: {c['PANEL']}; border-left: 1px solid {c['BAR_LINE']}; }}
+    /* 인쇄 창: 설정 두 칸 · 회색 미리보기 · 아래 단추 줄 */
+    QWidget#printcol {{ background: {c['PANEL']}; border-right: 1px solid {c['BAR_LINE']}; }}
+    QLabel#printhead {{ font-weight: bold; }}
+    QWidget#printpreview {{ background: {c['CANVAS']}; }}
+    QLabel#printfile {{ font-size: 8pt; }}
+    QFrame#printnav {{ background: {c['BG']}; border: 1px solid {c['BAR_LINE']}; border-radius: 4px; }}
+    QDialog#printdlg QLineEdit#printpos {{ border: none; padding: 0; background: transparent; min-height: 0; }}
+    QWidget#printbottom {{ background: {c['PANEL']}; border-top: 1px solid {c['BAR_LINE']}; }}
+    QDialog#printdlg QComboBox, QDialog#printdlg QSpinBox, QDialog#printdlg QDoubleSpinBox, QDialog#printdlg QLineEdit {{
+        min-height: 16px; padding-top: 2px; padding-bottom: 2px; }}
+    QDialog#printdlg QComboBox:disabled, QDialog#printdlg QSpinBox:disabled, QDialog#printdlg QDoubleSpinBox:disabled,
+    QDialog#printdlg QLineEdit:disabled {{ background: {c['HOVER']}; border-color: {c['BAR_LINE']}; }}
+    QToolButton#printstep {{ border: none; background: transparent; color: {c['TEXT_DIM']}; font-size: 12pt; padding: 0; }}
+    QToolButton#printstep:hover {{ color: {c['ACCENT']}; }}
+    QToolButton#printstep:disabled {{ color: {c['FIELD_LINE']}; }}
+    QPushButton#printlink {{ border: none; background: transparent; color: {c['ACCENT']}; padding: 2px 0; min-height: 0; }}
+    QPushButton#printlink:hover {{ color: {c['ACCENT_DARK']}; text-decoration: underline; }}
+    QWidget#printtabs {{ border-bottom: 1px solid {c['BAR_LINE']}; }}
+    QToolButton#printtab {{ border: none; border-bottom: 2px solid transparent; padding: 4px 6px; background: transparent;
+        font-weight: bold; }}
+    QToolButton#printtab:hover {{ color: {c['ACCENT']}; }}
+    QToolButton#printtab:checked {{ color: {c['ACCENT']}; border-bottom: 2px solid {c['ACCENT']}; }}
+    QToolButton#printtab:disabled {{ color: {c['TEXT_DIM']}; }}
+    QToolButton#orient {{ border: 1px solid transparent; border-radius: 3px; background: transparent; }}
+    QToolButton#orient:hover {{ background: {c['HOVER']}; }}
+    QToolButton#orient:checked {{ background: {c['PRESSED']}; border-color: {c['FIELD_LINE']}; }}
+    QToolButton#printprops {{ border: 1px solid {c['FIELD_LINE']}; border-radius: 11px; background: {c['FIELD']};
+        min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; padding: 0; }}
+    QToolButton#printprops:hover {{ border-color: {c['ACCENT']}; }}
 
     /* 패널 머리(썸네일·북마크·주석…): 높이·글자·밑줄을 한 모양으로 */
     QWidget#panelhead {{ background: {c['BG']}; border-bottom: 1px solid {c['BAR_LINE']}; }}
@@ -189,6 +216,8 @@ def qss(dark: bool = False) -> str:
         background: {c['ACCENT']}; border-color: {c['ACCENT']}; image: {check}; }}
     QRadioButton::indicator:checked {{ background: {c['ACCENT']}; border-color: {c['ACCENT']}; image: {dot}; }}
     QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{ background: {c['HOVER']}; }}
+    QCheckBox::indicator:checked:disabled {{ background: {c['TEXT_DIM']}; border-color: {c['TEXT_DIM']}; image: {check}; }}
+    QRadioButton::indicator:checked:disabled {{ background: {c['TEXT_DIM']}; border-color: {c['TEXT_DIM']}; image: {dot}; }}
 
     /* 목록 */
     QListWidget, QTreeWidget, QTreeView, QListView, QTableWidget {{ background: {c['BG']}; border: none;

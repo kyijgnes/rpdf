@@ -1375,11 +1375,12 @@ class MainWindow(QMainWindow):
 
     # ── 인쇄·메일·속성·설정·도움말 ──────────────────────────────
     def print_doc(self, t: DocTab):
-        """앱 모양의 인쇄 창(미리보기·크기 맞춤·홀짝·양면·흑백). 고른 설정은 다음에도 그대로."""
+        """알PDF 와 같은 인쇄 창(미리보기·크기·포스터·여러 페이지·소책자·양면·흑백). 고른 설정은 다음에도 그대로."""
         from .printing import PrintDialog, send
         if not QPrinterInfo.availablePrinterNames():
             QMessageBox.warning(self, "인쇄", "이 PC 에 설치된 프린터가 없습니다"); return
-        dlg = PrintDialog(self, t.doc.fitz, t.viewer.current, self.prefs.get("print"), lock=t.doc.lock)
+        dlg = PrintDialog(self, t.doc.fitz, t.viewer.current, self.prefs.get("print"), lock=t.doc.lock,
+                          view=self._print_view(t), name=t.doc.name)
         if not dlg.exec():
             return
         self.prefs["print"] = dlg.remember(); save_settings(self.settings)
@@ -1390,7 +1391,23 @@ class MainWindow(QMainWindow):
         elif err:
             QMessageBox.warning(self, "인쇄", err)
         else:
-            self.say(f"인쇄를 보냈습니다 · {opts.printer} · {len(opts.pages)}쪽")
+            self.say(f"인쇄를 보냈습니다 · {opts.printer} · {len(opts.pages) if opts.view is None else 1}쪽")
+
+    def _print_view(self, t: DocTab):
+        """인쇄 창의 「최근 보기」: 뷰어 지금 쪽에서 화면에 보이는 곳(쪽 좌표). 안 보이면 None."""
+        v = t.viewer
+        if not v.items:
+            return None
+        i = max(0, min(v.current, len(v.items) - 1))
+        it = v.items[i]
+        pr = it.mapRectToScene(it.page_rect())
+        inter = v.mapToScene(v.viewport().rect()).boundingRect().intersected(pr)
+        if inter.isEmpty() or v.zoom <= 0:
+            return None
+        z = v.zoom
+        r = fitz.Rect((inter.left() - pr.left()) / z, (inter.top() - pr.top()) / z,
+                      (inter.right() - pr.left()) / z, (inter.bottom() - pr.top()) / z) & t.doc.fitz[i].rect
+        return None if r.is_empty else (i, r)
 
     def _batch_print(self, inputs: list[str], printer: str):
         """일괄 인쇄: 파일마다 열어 인쇄 창과 같은 길(send)로 보낸다. 용지에 맞추기·쪽 모양 따라·컬러."""
