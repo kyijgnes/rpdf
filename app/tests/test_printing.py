@@ -221,6 +221,17 @@ def test_vector_record_matches_raster(app):
     assert np.abs(a.astype(int) - b.astype(int)).mean() < 3
 
 
+def test_progress_bar_has_no_clipped_percent(app):
+    """진행 막대는 6px 라 가운데 퍼센트 글자가 잘린다(사용자 지적). 글자를 끄고 「n / 총장」 글만 쓴다."""
+    from PySide6.QtWidgets import QProgressBar, QWidget
+    w = QWidget()
+    bar = PR.progress_dialog(w, 48)
+    line = bar.findChild(QProgressBar)
+    assert line is not None and not line.isTextVisible()
+    assert (line.minimum(), line.maximum()) == (0, 48)  # 막대를 바꿔 끼워도 장 수 범위 그대로
+    bar.close()
+
+
 def test_vector_falls_back_on_transparency(app):
     d = make_doc(1)
     d[0].draw_rect(fitz.Rect(50, 50, 200, 200), color=None, fill=(1, 0, 0), fill_opacity=0.5)

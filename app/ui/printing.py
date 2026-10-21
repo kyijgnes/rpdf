@@ -21,7 +21,7 @@ from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSizeF, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPageLayout, QPageSize, QPainter, QPen, QPixmap, QTransform
 from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFrame,
-                               QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressDialog, QPushButton, QRadioButton,
+                               QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QProgressDialog, QPushButton, QRadioButton,
                                QSpinBox, QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
 from . import icons, print_vector as PV, theme
@@ -493,6 +493,17 @@ def send(parent, doc: fitz.Document, opts: PrintOptions, name: str, lock=None) -
     return None
 
 
+def progress_dialog(parent, total: int) -> QProgressDialog:
+    """보내는 동안 띄우는 진행 창(「n / 총장 보내는 중」·막대·[그만두기])."""
+    bar = QProgressDialog("인쇄 준비 중", "그만두기", 0, total, parent)
+    # 막대가 6px(theme)라 가운데 퍼센트 글자가 위아래로 잘린다. 「n / 총장」 글이 이미 있어 퍼센트는 뺀다
+    line = QProgressBar(bar); line.setTextVisible(False); bar.setBar(line)
+    bar.setRange(0, total)  # 새 막대는 0~100 이라 다시 맞춘다
+    bar.setWindowTitle("인쇄"); bar.setWindowModality(Qt.WindowModality.WindowModal); bar.setMinimumDuration(400)
+    bar.setMinimumWidth(320)
+    return bar
+
+
 def _job(parent, doc: fitz.Document, opts: PrintOptions, sheets: list[Sheet], name: str, lock, printer: QPrinter):
     printer.setDocName(name)
     printer.setFullPage(True)  # 종이 왼쪽 위가 (0,0). 인쇄 영역은 plan 이 margins 로 이미 비켜 둠
@@ -518,9 +529,7 @@ def _job(parent, doc: fitz.Document, opts: PrintOptions, sheets: list[Sheet], na
         return "프린터를 열지 못했습니다(꺼져 있거나 연결이 끊겼는지 확인)"
     bar = None
     if parent is not None:
-        bar = QProgressDialog("인쇄 준비 중", "그만두기", 0, len(seq), parent)
-        bar.setWindowTitle("인쇄"); bar.setWindowModality(Qt.WindowModality.WindowModal); bar.setMinimumDuration(400)
-        bar.setMinimumWidth(320)
+        bar = progress_dialog(parent, len(seq))
     dpi = opts.dpi if opts.as_image else min(printer.resolution(), MAX_DPI)
     # 「이미지로 인쇄」 가 아니면 선·면으로 보낸다(스풀이 작아 빠르고 글자가 프린터 해상도 그대로)
     vector = None if opts.as_image else VectorPages(doc, opts.color, opts.annots or opts.forms, lock)
