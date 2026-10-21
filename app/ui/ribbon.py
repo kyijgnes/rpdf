@@ -81,7 +81,7 @@ TABS: list[tuple[str, str, list]] = [
         ("insert", "insert", "삽입", "menu", [("insert_blank", "빈 페이지"), ("insert_pdf", "PDF에서"), ("insert_images", "이미지에서")]), SEP,
         ("crop_pages", "crop", "자르기", "action", None), ("rotate_pages", "rotate", "회전", "action", None),
         ("resize", "resize", "크기", "action", None),
-        ("page_more", "more", "더보기", "menu", [("replace", "바꾸기"), ("duplicate", "복제"), ("pagebox", "페이지 박스"),
+        ("page_more", "more", "더보기", "menu", [("split_page", "페이지 분할(칸으로 나누기)"), ("replace", "바꾸기"), ("duplicate", "복제"), ("pagebox", "페이지 박스"),
                                                  ("pagelabel", "페이지 레이블"), ("delete_blank", "빈 페이지 삭제"), ("reverse", "순서 뒤집기")]),
     ]),
     ("tools", "도구", [

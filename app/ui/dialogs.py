@@ -367,6 +367,27 @@ class CropDialog(FormDialog):
         return {"rect": fitz.Rect(v["x0"], v["y0"], v["x1"], v["y1"]), "pages": self.pages.pages()}
 
 
+class SplitGridDialog(FormDialog):
+    """쪽 하나를 가로·세로 칸으로 나눠 여러 쪽으로(스캔한 두 쪽 펼침 나누기)."""
+    def __init__(self, parent, total: int, current: int, pages: list[int] | None = None):
+        super().__init__("페이지 분할", parent, "나누기")
+        self.cols = self.add("가로 칸", QSpinBox()); self.cols.setRange(1, 10); self.cols.setValue(2)
+        self.rows = self.add("세로 칸", QSpinBox()); self.rows.setRange(1, 10); self.rows.setValue(1)
+        self.preview = self.add("결과", QLabel())
+        self.pages = self.add("나눌 쪽", PageRangeEdit(total, current, odd_even=True))
+        if pages and len(pages) > 1:
+            self.pages.set_pages(pages)
+        self.cols.valueChanged.connect(self._sync); self.rows.valueChanged.connect(self._sync); self._sync()
+
+    def _sync(self):
+        n = self.cols.value() * self.rows.value()
+        self.preview.setText(f"한 쪽 → {n}쪽 · 왼쪽 위부터 오른쪽, 다음 줄 차례" if n > 1 else "나눌 칸이 없습니다")
+        self.bb.button(QDialogButtonBox.StandardButton.Ok).setEnabled(n > 1)
+
+    def values(self) -> dict:
+        return {"cols": self.cols.value(), "rows": self.rows.value(), "pages": self.pages.pages()}
+
+
 class ResizeDialog(FormDialog):
     def __init__(self, parent, total: int, current: int):
         super().__init__("쪽 크기", parent)

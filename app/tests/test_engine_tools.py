@@ -508,6 +508,28 @@ def test_align_widgets_union_and_distribute():
         tools.align_widgets(d.fitz, items[:2], "dist_h")
 
 
+def test_split_grid_two_up_and_rotated():
+    from app.engine import pages as P
+    d = _app_doc(["둘째 쪽 second"])
+    p = d.fitz.new_page(0, width=842, height=595)   # 가로로 넓은 두 쪽 펼침
+    tw = fitz.TextWriter(p.rect)
+    tw.append((72, 300), "왼쪽 LEFT", font=tools.korean_font(), fontsize=14)
+    tw.append((500, 300), "오른쪽 RIGHT", font=tools.korean_font(), fontsize=14)
+    tw.write_text(p)
+    del p
+    d.fitz[1].set_rotation(90)
+    m = P.split_grid(d, [0, 1], cols=2, rows=1)
+    f = d.fitz
+    assert f.page_count == 4 and m == [0, 0, 1, 1]
+    assert f[0].rect.width == pytest.approx(421) and "LEFT" in f[0].get_text() and "RIGHT" not in f[0].get_text()
+    assert "RIGHT" in f[1].get_text() and "LEFT" not in f[1].get_text()
+    # 돌린 쪽도 보이는 화면 기준으로 왼쪽·오른쪽 반
+    assert f[2].rect.width == pytest.approx(421) and f[2].rect.height == pytest.approx(595)
+    assert "second" in f[2].get_text() + f[3].get_text()
+    with pytest.raises(ValueError):
+        P.split_grid(d, [0], 1, 1)
+
+
 def test_page_subset_and_format_range():
     from app.engine import pages as P
     assert P.subset(range(6), "odd") == [0, 2, 4] and P.subset(P.parse_range("1-6", 6), "even") == [1, 3, 5]

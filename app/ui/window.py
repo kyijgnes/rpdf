@@ -766,7 +766,7 @@ class MainWindow(QMainWindow):
             # 구성
             elif key in ("thumb_in", "thumb_out"): t.organize.set_width(t.organize.thumb_w + (30 if key == "thumb_in" else -30))
             elif key in ("rotate_left", "rotate_right", "delete_pages", "extract", "insert_blank", "insert_pdf", "insert_images", "crop_pages",
-                         "resize", "replace", "duplicate", "pagebox", "delete_blank", "reverse", "rotate_pages", "split"):
+                         "resize", "replace", "duplicate", "pagebox", "delete_blank", "reverse", "rotate_pages", "split", "split_page"):
                 pages = t.organize.selected_pages() if t.view_stack.currentWidget() is t.organize else []
                 if not pages and t.side.isVisible() and t.side_key == "thumbs":
                     pages = t.thumbs.selected_pages()
@@ -903,6 +903,11 @@ class MainWindow(QMainWindow):
                 t.changed(None, structural=True); self.say(f"빈 쪽 {len(gone)}장을 지웠습니다")
             elif key == "reverse":
                 rev = list(range(d.page_count - 1, -1, -1)); P.reorder(d, rev); t.changed(None, structural=True, mapping=rev)
+            elif key == "split_page":
+                dlg = D.SplitGridDialog(self, d.page_count, cur, pages)
+                if dlg.exec():
+                    vals = dlg.values(); m = P.split_grid(d, vals["pages"], vals["cols"], vals["rows"])
+                    t.changed(None, structural=True, mapping=m); self.say(f"쪽 {len(vals['pages'])}장을 나눠 모두 {d.page_count}쪽이 됐습니다")
             elif key == "split":
                 dlg = D.SplitDialog(self, d.page_count, os.path.dirname(d.path) if d.path else os.path.expanduser("~"))
                 if dlg.exec():

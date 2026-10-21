@@ -90,6 +90,42 @@ def delete(doc: Document, pages: Iterable[int]):
         doc.fitz.delete_pages(pages)
 
 
+def split_grid(doc: Document, pages: Iterable[int], cols: int = 2, rows: int = 1) -> list[int]:
+    """쪽 하나를 가로 cols × 세로 rows 칸으로 나눠 여러 쪽으로(알PDF 「페이지 분할」, 스캔한 두 쪽 펼침 나누기).
+
+    칸마다 쪽을 통째로 복사하고 보이는 영역(CropBox)만 그 칸으로 줄인다. 글·주석·링크가 그대로 남는다.
+    칸 차례는 보이는 화면 기준 왼쪽 위 → 오른쪽 → 다음 줄. 돌려주는 값은 새 쪽마다 원래 쪽 번호(되돌리기·썸네일용)."""
+    cols, rows = int(cols), int(rows)
+    if not (1 <= cols <= 10 and 1 <= rows <= 10) or cols * rows == 1:
+        raise ValueError("가로·세로 칸 수는 1~10 이고, 둘 다 1 이면 나눌 게 없습니다")
+    targets = sorted({p for p in pages if 0 <= p < doc.page_count})
+    doc.snapshot()
+    mapping = []
+    with doc.lock:
+        f = doc.fitz
+        for src in range(f.page_count):
+            mapping.append(src)
+        for pno in reversed(targets):   # 뒤에서부터 끼워 앞 번호가 밀리지 않게
+            page = f[pno]
+            vis = page.rect
+            cb = page.cropbox
+            w, h = vis.width / cols, vis.height / rows
+            cells = [fitz.Rect(vis.x0 + c * w, vis.y0 + r * h, vis.x0 + (c + 1) * w, vis.y0 + (r + 1) * h)
+                     for r in range(rows) for c in range(cols)]
+            dm = page.derotation_matrix
+            boxes = []
+            for cell in cells:   # 보이는 좌표 → 회전 전 좌표(CropBox 원점 기준) → MediaBox 기준
+                u = cell * dm
+                u.normalize()
+                boxes.append(fitz.Rect(u.x0 + cb.x0, u.y0 + cb.y0, u.x1 + cb.x0, u.y1 + cb.y0))
+            for _ in boxes[1:]:
+                f.fullcopy_page(pno, pno + 1 if pno + 1 < f.page_count else -1)   # -1 = 맨 뒤
+            for k, box in enumerate(boxes):
+                f[pno + k].set_cropbox(box)
+            mapping[pno:pno + 1] = [pno] * len(boxes)
+    return mapping
+
+
 def move(doc: Document, src: list[int], dest: int):
     """src 쪽들을 dest 자리(0-based, 끼울 자리 앞 인덱스) 로 옮긴다."""
     order = list(range(doc.page_count))
