@@ -6,12 +6,15 @@
     python release.py --prune                 횟수를 적은 뒤 최신 릴리스 하나만 남기고 옛 릴리스를 지운다(태그는 남김)
     python release.py --build-only            이 PC 에서 HEAD 사본으로 빌드·설치 프로그램만(git·GitHub 안 건드림, 시험용)
     python release.py --build-only --as 0.0.1 사본 안의 버전만 바꿔서(시험용, appinfo.py 그대로)
+    python release.py --sign v0.2.0           올라간 릴리스에 배포자 서명(latest.sig)만 다시 붙인다
 
 - 이름·버전은 app/appinfo.py 한 곳. 버전은 여기서만 올린다(세 자리). 올린 줄만 따로 커밋(`버전 X.Y.Z`).
 - 태그는 `git tag -a vX.Y.Z -m ""`(annotated·빈 메시지). lightweight 면 GitHub 이 릴리스 페이지에 커밋 메시지를 띄운다.
 - 빌드는 이 PC 가 아니라 GitHub Actions(.github/workflows/release.yml, windows 러너)가 태그의 커밋으로 한다.
   **커밋 안 한 것은 실리지 않는다.** 릴리스에는 setup 과 latest.json 만, 본문(릴리스 노트)은 비운다.
 - 정식 릴리스는 main 에서만(`--any-branch` 로 풀 수 있다). 다 올라가면 횟수를 적고 옛 릴리스를 지운다(--prune 과 같은 일).
+- 배포자 서명: Actions 가 다 올리면 이 PC 가 latest.json·setup 을 받아 대조하고 latest.sig 를 붙인다(sign_release).
+  비밀키(%USERPROFILE%\\.rpdf, signkey.py)가 없거나 정책 파일이 안 올라가 있으면 시작하지 않는다.
 - --build-only 는 이 PC 에서 빌드하므로 한 번에 한 세션(공용 규칙 ③): 작업 보드에 `_PDF앱 빌드중.md` 를 잡고 끝나면 지운다.
 """
 from __future__ import annotations
@@ -34,7 +37,9 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from app.updater import LATEST_URL, RELEASE_REPO, parse_version  # noqa: E402
+from app.updater import LATEST_URL, RELEASE_REPO, SIG_NAME, parse_version, read_small  # noqa: E402
+from app import policy, signing  # noqa: E402
+import signkey  # noqa: E402
 
 WORKFLOW = "release.yml"
 WORK = os.path.join(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "Temp", "RPDF_release")
@@ -109,10 +114,11 @@ def remote_latest() -> str | None:
 # ── 내려받은 횟수 · 옛 릴리스 지우기 ─────────────────────────────
 # GitHub 은 릴리스를 지우면 내려받은 횟수도 같이 지운다. 그래서 적고 나서 지운다(쿨다운 cooldown_release.py 와 같은 일).
 def fetch_releases() -> list[dict]:
+    """버전 릴리스(vX.Y.Z)만. 정책 릴리스(policy)는 세지도 지우지도 않는다."""
     raw = gh("api", f"repos/{RELEASE_REPO}/releases?per_page=100")
     return [{"tag": r["tag_name"], "published": r.get("published_at") or r.get("created_at"),
              "assets": {a["name"]: int(a["download_count"]) for a in r.get("assets", [])}}
-            for r in json.loads(raw)]
+            for r in json.loads(raw) if re.fullmatch(r"v\d+\.\d+\.\d+", r["tag_name"])]
 
 
 def record_counts() -> list[dict]:
@@ -154,6 +160,61 @@ def prune():
         print(f"  {tag} 지움")
 
 
+# ── 배포자 서명(latest.sig) ─────────────────────────────────────
+# 비밀키는 GitHub 에 두지 않는다. Actions 가 릴리스를 올린 뒤 이 PC 가 latest.json·setup 을 받아
+# sha256·크기를 다시 대조하고 latest.json 에 서명해 latest.sig 를 붙인다. 서명이 붙기 전까지 새 앱은 그 버전을 안 받는다.
+def policy_online() -> bool:
+    try:
+        raw, _, _ = read_small(policy.POLICY_URL, 15)
+        policy.parse(raw)
+        return True
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False
+        raise
+    except policy.PolicyError as e:
+        die(f"올라간 정책 파일이 이상합니다({e}). python publish_policy.py 로 확인")
+
+
+def sign_folder(folder: str) -> str:
+    """폴더의 latest.json 이 가리키는 setup 의 sha256·크기를 대조하고 latest.sig 를 쓴다."""
+    import hashlib
+    path = os.path.join(folder, "latest.json")
+    with open(path, "rb") as f:
+        raw = f.read()
+    data = json.loads(raw.decode("utf-8"))
+    setup = os.path.join(folder, data["setup"])
+    h = hashlib.sha256()
+    with open(setup, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    if h.hexdigest() != data["sha256"] or os.path.getsize(setup) != int(data["size"]):
+        die(f"{setup} 이 latest.json 의 sha256·크기와 다릅니다. 서명하지 않습니다")
+    sig = signkey.sign(signing.DOMAIN_LATEST, raw)
+    if not signing.ok(signing.DOMAIN_LATEST, raw, sig):
+        die("서명을 만들었는데 앱 공개키로 확인이 안 됩니다(키 짝 확인: python signkey.py)")
+    out = os.path.join(folder, SIG_NAME)
+    with open(out, "w", encoding="ascii") as f:
+        f.write(sig)
+    return out
+
+
+def sign_release(tag: str, version: str):
+    step(f"{tag} 에 배포자 서명 붙이기(latest.json·setup 을 받아 대조)")
+    folder = os.path.join(WORK, "sign", tag)
+    shutil.rmtree(folder, ignore_errors=True)
+    os.makedirs(folder)
+    gh("release", "download", tag, "--repo", RELEASE_REPO, "--dir", folder,
+       "--pattern", "latest.json", "--pattern", "*-setup-*.exe")
+    with open(os.path.join(folder, "latest.json"), encoding="utf-8") as f:
+        if json.load(f)["version"] != version:
+            die(f"{tag} 의 latest.json 버전이 {version} 이 아닙니다")
+    sig = sign_folder(folder)
+    gh("release", "upload", tag, sig, "--repo", RELEASE_REPO, "--clobber")
+    shutil.rmtree(folder, ignore_errors=True)
+    print(f"  {SIG_NAME} 붙임")
+
+
 # ── 내놓기 ──────────────────────────────────────────────────────
 def find_run(tag: str) -> str | None:
     for _ in range(30):   # 태그를 밀고 워크플로가 뜨기까지 몇 초 걸린다
@@ -174,6 +235,10 @@ def release(target: str | None, any_branch: bool):
         die(f"git 원격 origin 이 없습니다: git remote add origin https://github.com/{RELEASE_REPO}.git")
     if subprocess.run(["gh", "auth", "status"], capture_output=True).returncode:
         die("gh 로그인이 안 돼 있습니다: gh auth login")
+    signkey.load_seed()   # latest.json 에 서명을 못 붙이면 새 앱이 업데이트를 안 받는다. 키부터 본다
+    if not policy_online():
+        die("올라간 정책 파일이 없습니다. 이대로 내면 새 버전 설치본이 처음 켤 때 안 열립니다.\n"
+            "먼저: python publish_policy.py 그대로")
     cur = read_info(HERE)["VERSION"]
     target = check_version(target or bump(cur))
     tag = f"v{target}"
@@ -207,6 +272,7 @@ def release(target: str | None, any_branch: bool):
     if subprocess.call(["gh", "run", "watch", rid, "--repo", RELEASE_REPO, "--exit-status", "--interval", "20"]):
         die(f"워크플로 실패. 로그: gh run view {rid} --repo {RELEASE_REPO} --log-failed\n"
             f"고친 뒤 태그를 지우고(git push origin :{tag} · git tag -d {tag}) 다시 python release.py {target}")
+    sign_release(tag, target)
     for _ in range(12):
         got = remote_latest()
         if got == target:
@@ -289,6 +355,7 @@ def main() -> int:
     ap.add_argument("--build-only", action="store_true", help="이 PC 에서 빌드·설치 프로그램만(시험)")
     ap.add_argument("--as", dest="as_version", help="--build-only 와 같이: 사본 안 버전만 바꾼다(시험용)")
     ap.add_argument("--any-branch", action="store_true", help="main 이 아니어도 정식 릴리스")
+    ap.add_argument("--sign", metavar="TAG", help="이미 올라간 릴리스(vX.Y.Z)에 배포자 서명만 다시 붙인다")
     a = ap.parse_args()
     os.chdir(HERE)
     if a.counts:
@@ -297,6 +364,8 @@ def main() -> int:
         prune()
     elif a.build_only:
         build_only(a.as_version)
+    elif a.sign:
+        sign_release(a.sign, a.sign.lstrip("v"))
     else:
         release(a.version, a.any_branch)
     return 0

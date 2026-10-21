@@ -6,6 +6,7 @@
 
 - 이름·버전은 app/appinfo.py 한 곳. 바꾸지 않는 열쇠(설치 GUID 등)는 아래 머리에 있다.
 - latest.json 은 앱 안 업데이트가 보는 것(버전·setup 이름·받을 주소·sha256·크기). 바뀐 것(notes)은 적지 않는다(2026-10-20 결정).
+  배포자 서명(latest.sig)은 여기서 안 붙인다(Actions 에는 비밀키가 없다). release.py 가 이 PC 에서 붙인다.
 """
 from __future__ import annotations
 
@@ -102,7 +103,7 @@ def write_latest(setup: str, version: str) -> str:
         for b in iter(lambda: f.read(1 << 20), b""):
             h.update(b)
     name = os.path.basename(setup)
-    data = {"version": version, "setup": name,
+    data = {"app": "RPDF", "version": version, "setup": name,
             "url": f"https://github.com/{RELEASE_REPO}/releases/download/v{version}/{name}",
             "sha256": h.hexdigest(), "size": os.path.getsize(setup),
             "date": f"{datetime.datetime.now(datetime.timezone.utc):%Y-%m-%d %H:%M} UTC"}
