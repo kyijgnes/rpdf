@@ -61,8 +61,8 @@ jobs:
           path: release/*
 
       - name: 릴리스에 붙이기
-        # ★ 릴리스 노트(본문)를 쓰지 않는다. 제목(태그)과 받을 파일만 둔다(쿨다운과 같은 규칙).
-        #   body / body_path 를 넣지 말 것, generate_release_notes 도 켜지 말 것(자동 생성도 노트다).
+        # ★ 본문은 받을 setup 으로 가는 큰 링크 하나뿐(10-21 사용자 지시: 처음 받는 사람도 바로 찾게).
+        #   변경 내용(노트)은 쓰지 않는다. generate_release_notes 도 켜지 말 것(자동 생성도 노트다).
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
@@ -70,5 +70,8 @@ jobs:
             release/RPDF-setup-${{ steps.ver.outputs.version }}.exe
             release/latest.json
           generate_release_notes: false
-          body: ""
+          body: |
+            ## ▼▼ 다운로드 ▼▼
+            ## [RPDF-setup-${{ steps.ver.outputs.version }}.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/RPDF-setup-${{ steps.ver.outputs.version }}.exe)
+            ## ▲▲▲▲▲▲▲▲
           make_latest: "true"
