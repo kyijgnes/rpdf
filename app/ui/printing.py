@@ -1,4 +1,4 @@
-"""인쇄: 알PDF 인쇄 창과 같은 배치·항목의 인쇄 창(PrintDialog)과 실제로 그려 보내는 일(send).
+"""인쇄: 미리보기·크기·여러 페이지·소책자를 고르는 인쇄 창(PrintDialog)과 실제로 그려 보내는 일(send).
 
 창은 세 칸이다. 왼쪽(프린터·인쇄 설정·방향·페이지 범위), 가운데 고급 설정(내용 인쇄·홀짝·역순·인쇄 모드 탭
 크기/포스터/여러 페이지/소책자), 오른쪽 미리보기와 쪽 넘기기. 「고급 설정 숨기기」 로 가운데 칸을 접는다.
@@ -99,7 +99,7 @@ def fit_in(w: float, h: float, box: fitz.Rect, fit: str = "fit", scale: float = 
     """w×h(pt) 를 box 에 놓는 법: (돌릴 각도 0·270, 배율, 놓일 자리 Rect)."""
     rot = 0
     if auto_rotate and abs(w - h) > 1 and (w > h) != (box.width > box.height):
-        rot, w, h = 270, h, w  # 알PDF 처럼 왼쪽으로 눕힌다(글 윗머리가 왼쪽)
+        rot, w, h = 270, h, w  # 일반적인 PDF 편집기처럼 왼쪽으로 눕힌다(글 윗머리가 왼쪽)
     s = min(box.width / w, box.height / h) if fit == "fit" else scale if fit == "custom" else 1.0
     tw, th = w * s, h * s
     x = box.x0 + (box.width - tw) / 2 if center else box.x0
@@ -674,7 +674,7 @@ def _page_icon(landscape: bool, color: str) -> QIcon:
 
 # ── 인쇄 창 ──────────────────────────────────────────────────────
 class PrintDialog(QDialog):
-    COL_W = 268  # 왼쪽·가운데 칸 폭(알PDF 와 같은 크기: 창 안쪽 1061×637)
+    COL_W = 268  # 왼쪽·가운데 칸 폭(창 안쪽 1061×637)
 
     def __init__(self, parent, doc: fitz.Document, current: int, remember: dict | None = None, lock=None,
                  view: tuple | None = None, name: str = ""):

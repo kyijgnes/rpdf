@@ -2,7 +2,7 @@
 import os
 import sys
 
-APP_NAME = "RPDF"         # 화면에 보이는 이름(창 제목·도움말·바로 가기). 알PDF 의 「알」을 R 로(2026-10-20)
+APP_NAME = "RPDF"         # 화면에 보이는 이름(창 제목·도움말·바로 가기).
 APP_ID = "RPDF"           # exe·설정 폴더 이름(띄어쓰기 없이)
 OLD_APP_IDS = ("PDF편집기",)  # 예전 APP_ID. 처음 켤 때 그 설정을 새 자리로 복사한다(설치 프로그램이 옛 흔적 정리할 때도 씀)
 ORG = "kyijgnes"

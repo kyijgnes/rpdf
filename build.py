@@ -54,6 +54,37 @@ def prune(internal: str) -> int:
     return gone
 
 
+def write_notices(dist: str) -> str:
+    """제3자 라이선스 고지(THIRD-PARTY-NOTICES.txt). 실은 패키지의 dist-info 에서 LICENSE·COPYING 을 모은다."""
+    from importlib import metadata
+    names = ("PyMuPDF", "PySide6", "PySide6_Essentials", "PySide6_Addons", "shiboken6", "pikepdf", "pillow", "numpy",
+             "python-docx", "python-pptx", "openpyxl", "psutil", "pywin32", "lxml", "cryptography")
+    out = [f"{APP_NAME} {VERSION} 에 들어 있는 오픈소스 부품과 라이선스",
+           f"{APP_NAME} 자체는 AGPL-3.0 이다(PyMuPDF 가 AGPL). 소스: https://github.com/{ORG}/rpdf",
+           "Qt(PySide6)는 LGPL-3.0 이다. Qt 소스: https://download.qt.io/official_releases/qt/ · https://code.qt.io/",
+           "Python 런타임은 PSF License 이다: https://docs.python.org/3/license.html", ""]
+    for n in names:
+        try:
+            d = metadata.distribution(n)
+        except metadata.PackageNotFoundError:
+            continue
+        lic = d.metadata.get("License-Expression") or d.metadata.get("License") or ""
+        out += ["=" * 78, f"{d.metadata['Name']} {d.version}  {lic.splitlines()[0] if lic else ''}".rstrip(), "=" * 78]
+        for f in d.files or []:
+            base = f.name.upper()
+            if base.startswith(("LICENSE", "LICENCE", "COPYING", "NOTICE")) and f.suffix.lower() in ("", ".txt", ".md", ".rst"):
+                try:
+                    out.append(open(f.locate(), encoding="utf-8", errors="replace").read().strip())
+                except (OSError, FileNotFoundError):
+                    pass
+        out.append("")
+    path = os.path.join(dist, "THIRD-PARTY-NOTICES.txt")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(out))
+    shutil.copy(os.path.join(HERE, "LICENSE"), os.path.join(dist, "LICENSE.txt"))
+    return path
+
+
 def write_version_file() -> str:
     """exe 버전 정보(파일 설명·제품 이름·버전·회사). 비어 있으면 탐색기 「연결 프로그램」이 이름을 못 붙인다(10-20)."""
     nums = (VERSION.split(".") + ["0"] * 4)[:4]
@@ -103,6 +134,7 @@ def main() -> int:
     if r == 0:
         gone = prune(os.path.join(HERE, "dist", NAME, "_internal"))
         print(f"안 쓰는 Qt 덩어리 {gone / 2**20:.0f}MB 지움")
+        print("라이선스 고지:", write_notices(os.path.join(HERE, "dist", NAME)))
         print("빌드 끝:", os.path.join(HERE, "dist", NAME, NAME + ".exe"))
     return r
 

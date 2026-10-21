@@ -1,6 +1,6 @@
 """주석 종류별 기본 모양(색·두께·불투명도·글자 크기)을 마지막에 쓴 값으로 기억한다.
 
-알PDF 는 종류마다 Annots.ini 에 한 칸씩 두고 「마지막에 고친 모양을 기본값으로」가 기본 켬이다.
+일반적인 PDF 편집기는 종류마다 Annots.ini 에 한 칸씩 두고 「마지막에 고친 모양을 기본값으로」가 기본 켬이다.
 우리는 설정 폴더의 annot_styles.json 한 벌에 도구 이름(highlight·rect·textbox …)마다 한 칸.
 settings.json 은 창이 통째로 다시 쓰므로 따로 둔다.
 """
@@ -14,11 +14,11 @@ import fitz
 from .annots import Color, MARKUP_KINDS, _freetext_border, _freetext_style, annot_colors  # noqa: F401
 from .document import Document
 
-YELLOW = (1.0, 238 / 255, 54 / 255)   # 알PDF 강조색 #FFEE36
+YELLOW = (1.0, 238 / 255, 54 / 255)   # 강조색 #FFEE36
 RED = (1.0, 0.0, 0.0)
 PURPLE = (0.5, 0.0, 0.5)
 
-# 알PDF 기본값(기능명세/주석.md 「주석 객체와 종류별 기본값」). 선 굵기 1·불투명도 100%·채움 없음이 공통.
+# 기본값(기능명세/주석.md 「주석 객체와 종류별 기본값」). 선 굵기 1·불투명도 100%·채움 없음이 공통.
 _SHAPE = {"stroke": RED, "fill": None, "width": 1.0, "opacity": 1.0}
 _LINE = {"stroke": RED, "width": 1.0, "opacity": 1.0}
 _TEXT = {"text_color": RED, "fontsize": 14.0, "opacity": 1.0}
@@ -28,7 +28,7 @@ DEFAULTS: dict[str, dict] = {
     "strike": {"color": RED, "opacity": 1.0},
     "squiggly": {"color": RED, "opacity": 1.0},
     "caret": {"color": PURPLE, "opacity": 1.0},
-    "areahl": {"color": YELLOW, "opacity": 0.3},   # 알PDF 는 채움 알파 76(약 30%)
+    "areahl": {"color": YELLOW, "opacity": 0.3},   # 일반적인 PDF 편집기는 채움 알파 76(약 30%)
     "rect": dict(_SHAPE), "oval": dict(_SHAPE), "polygon": dict(_SHAPE), "cloud": dict(_SHAPE),
     "line": dict(_LINE), "arrow": dict(_LINE), "polyline": dict(_LINE),
     "pencil": {"stroke": RED, "width": 1.0, "opacity": 1.0},
@@ -45,7 +45,7 @@ for _k in ("rect", "oval", "polygon", "cloud", "line", "arrow", "polyline"):
     FIELDS[_k] += ("dashes",)
 SELECTED_ONLY = ("dashes",)
 
-# 테두리 모양(알PDF 속성 패널 목록에서 구름 둘은 다각형의 「클라우드」 도구로 따로 있어 뺌)
+# 테두리 모양(속성 패널 목록에서 구름 둘은 다각형의 「클라우드」 도구로 따로 있어 뺌)
 DASHES = {"실선": (), "점선 2·2": (2, 2), "점선 3·3": (3, 3), "점선 4·4": (4, 4),
           "점선 4·3·2·4": (4, 3, 2, 4), "점선 4·3·1·6·3·3": (4, 3, 1, 6, 3, 3), "점선 8·4·4·4": (8, 4, 4, 4)}
 

@@ -91,7 +91,7 @@ def delete(doc: Document, pages: Iterable[int]):
 
 
 def split_grid(doc: Document, pages: Iterable[int], cols: int = 2, rows: int = 1) -> list[int]:
-    """쪽 하나를 가로 cols × 세로 rows 칸으로 나눠 여러 쪽으로(알PDF 「페이지 분할」, 스캔한 두 쪽 펼침 나누기).
+    """쪽 하나를 가로 cols × 세로 rows 칸으로 나눠 여러 쪽으로(「페이지 분할」, 스캔한 두 쪽 펼침 나누기).
 
     칸마다 쪽을 통째로 복사하고 보이는 영역(CropBox)만 그 칸으로 줄인다. 글·주석·링크가 그대로 남는다.
     칸 차례는 보이는 화면 기준 왼쪽 위 → 오른쪽 → 다음 줄. 돌려주는 값은 새 쪽마다 원래 쪽 번호(되돌리기·썸네일용)."""

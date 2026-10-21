@@ -1,6 +1,6 @@
 """오른쪽 속성 패널: 고른 주석의 모양·정보, 또는 지금 도구의 기본 모양.
 
-알PDF 처럼 그 종류에 맞는 칸만 보이고, 고른 주석은 바꾸는 즉시 적용한다.
+일반적인 PDF 편집기처럼 그 종류에 맞는 칸만 보이고, 고른 주석은 바꾸는 즉시 적용한다.
 바꾼 모양은 그 종류의 기본값으로 기억한다(engine/annot_style, 「마지막에 고친 모양을 기본값으로」).
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from ..engine import annots as A
 from .dialogs import ColorButton, from_rgb01
 from .sidebar import group_card, panel_head
 
-# 알PDF 속성 패널 색 견본 여섯: 노랑·빨강·주황·파랑·초록·보라
+# 속성 패널 색 견본 여섯: 노랑·빨강·주황·파랑·초록·보라
 SWATCHES = [(1, 238 / 255, 54 / 255), (1, 0, 0), (1, 154 / 255, 0), (49 / 255, 131 / 255, 1), (0, 253 / 255, 0),
             (194 / 255, 76 / 255, 1)]
 _TEXT_KEYS = ("textbox", "callout", "typewriter")

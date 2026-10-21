@@ -357,7 +357,7 @@ class PageView(QGraphicsView):
         self.centerOn(new_pt + (QPointF(self.viewport().width() / 2, self.viewport().height() / 2) - vp))
         self.zoomChanged.emit(z)
 
-    # 확대·축소 단추가 건너는 배율(알PDF 단계표에서 10~800% 만). Ctrl+휠은 1.1배씩 부드럽게
+    # 확대·축소 단추가 건너는 배율(단계표에서 10~800% 만). Ctrl+휠은 1.1배씩 부드럽게
     STEPS = (0.10, 0.15, 0.25, 1 / 3, 0.50, 0.75, 1.00, 1.25, 1.50, 2.00, 3.00, 4.00, 6.00, 8.00)
 
     def zoom_in(self):
@@ -895,7 +895,7 @@ class PageView(QGraphicsView):
         if k == Qt.Key.Key_Delete and self.sel:
             self.delete_selection(); return
         if k == Qt.Key.Key_Space and not e.isAutoRepeat() and self.tool != "hand" and not self._space_tool:
-            # 누르는 동안만 손 도구(알PDF 와 같음). 떼면 하던 도구로
+            # 누르는 동안만 손 도구. 떼면 하던 도구로
             self._space_tool = self.tool
             self.viewport().setCursor(Qt.CursorShape.OpenHandCursor); self.tool = "hand"
             return

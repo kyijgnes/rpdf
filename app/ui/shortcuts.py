@@ -1,6 +1,6 @@
 """단축키 표 · 사용자가 바꾼 키 · 환경 설정의 단축키 칸.
 
-기본 키는 알PDF 4.11 의 단축키 표(참고/알PDF분석/기능명세/화면틀·검색·설정.md 8절)를 따르고, RPDF 에만 있던 키는 뒤에 덧붙였다.
+기본 키는 일반적인 PDF 편집기의 단축키 배치를 따르고, RPDF 에만 있던 키는 뒤에 덧붙였다.
 설정 파일(settings.json)에는 기본값과 다른 동작만 `hotkeys: {동작: ["Ctrl+W", …]}` 로 둔다. 빈 목록이면 키 없음.
 화살표·Home·End·Enter·Space 처럼 문서 보기 안에서만 듣는 키는 뷰어(keyPressEvent)가 맡아 여기 없다.
 """
@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QHBoxLayout, QHeaderView, QKeySequenceEdit, QLabe
 
 from . import theme
 
-MAX_KEYS = 3  # 한 동작에 키 조합 셋까지(알PDF 단축키 편집 창과 같음)
+MAX_KEYS = 3  # 한 동작에 키 조합 셋까지
 
 # (동작, 묶음, 이름, 기본 키)
 TABLE: list[tuple[str, str, str, tuple[str, ...]]] = [

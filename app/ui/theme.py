@@ -1,4 +1,4 @@
-"""색·여백·글꼴 한 곳. 알PDF 기본 스킨(흰 바탕·옅은 회색 띠·빨간 강조) 을 따른다.
+"""색·여백·글꼴 한 곳. 흰 바탕·옅은 회색 띠·빨간 강조.
 
 화살표(⌄)·체크 표시는 Qt 기본 그림(테마마다 모양이 달라 하늘색 네모가 섞임) 대신 여기서 같은 굵기로 그려 쓴다.
 """
@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 import tempfile
 
-ACCENT = "#E8383D"        # 알PDF 빨강
+ACCENT = "#E8383D"        # 강조 빨강
 ACCENT_DARK = "#C9272C"
 BG = "#FFFFFF"
 BAR = "#F4F5F7"           # 리본 단추 줄·상태줄·세로 막대 바탕

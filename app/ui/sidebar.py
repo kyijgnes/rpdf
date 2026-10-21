@@ -504,7 +504,7 @@ class AnnotPanel(QWidget):
         row = QHBoxLayout(); row.setSpacing(4)
         self.filter = QComboBox(); self.filter.addItems(["전체"] + sorted(set(A.KIND_NAMES.values())))
         self.filter.currentIndexChanged.connect(self.reload)
-        # 묶는 기준(알PDF 주석 목록: 쪽·날짜·작성자·종류). 저장하지 않고 늘 쪽순으로 연다
+        # 묶는 기준(주석 목록: 쪽·날짜·작성자·종류). 저장하지 않고 늘 쪽순으로 연다
         self.group = QComboBox(); self.group.addItems(["쪽순", "날짜순", "작성자순", "종류순"])
         self.group.currentIndexChanged.connect(self.reload)
         row.addWidget(self.filter, 1); row.addWidget(self.group, 1); bl.addLayout(row)
@@ -792,7 +792,7 @@ class SearchPanel(QWidget):
             self._splice(set(pages), near, jump=False)
 
     def replace_one(self):
-        """지금 결과 하나를 바꾸고 다음 결과로(알PDF 「바꾸기」). 아직 안 찾았으면 이번에는 찾기만."""
+        """지금 결과 하나를 바꾸고 다음 결과로(「바꾸기」). 아직 안 찾았으면 이번에는 찾기만."""
         if not self.hits:
             self.run(); return
         if not (0 <= self.current < len(self.results)):

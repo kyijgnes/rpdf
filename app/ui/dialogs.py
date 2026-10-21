@@ -686,7 +686,7 @@ class EncryptDialog(FormDialog):
         self.form.addRow(g)
         box = QWidget(); vl = QVBoxLayout(box); vl.setContentsMargins(0, 0, 0, 0)
         self.methods = {}
-        for key, label in self.METHODS:   # 알PDF 와 같이 128 bit AES 가 기본, 이미 걸린 문서는 그 방식
+        for key, label in self.METHODS:   # 128 bit AES 가 기본, 이미 걸린 문서는 그 방식
             rb = QRadioButton(label); self.methods[key] = rb; vl.addWidget(rb)
         self.methods.get(method or "aes128", self.methods["aes128"]).setChecked(True)
         self.add("방식", box)

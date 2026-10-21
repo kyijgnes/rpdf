@@ -35,7 +35,7 @@ from .start import StartPage
 from .update import UpdateUI
 from .viewer import PageView
 
-from ..appinfo import APP_ID, APP_NAME, ICON, OLD_APP_IDS  # noqa: E402
+from ..appinfo import APP_ID, APP_NAME, ICON, OLD_APP_IDS, VERSION  # noqa: E402
 
 SETTINGS = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_ID, "settings.json")
 PDF_FILTER = "PDF 파일 (*.pdf);;모든 파일 (*)"
@@ -372,7 +372,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
     def _shortcuts(self):
-        """단축키를 건다(알PDF 와 같은 기본 키, 환경 설정 「단축키」 에서 바꾼 것은 settings 의 hotkeys). 바꾸면 다시 부른다."""
+        """단축키를 건다(기본 키, 환경 설정 「단축키」 에서 바꾼 것은 settings 의 hotkeys). 바꾸면 다시 부른다."""
         for sc in getattr(self, "_sc", []):
             sc.setEnabled(False); sc.setParent(None); sc.deleteLater()
         self._sc = []
@@ -541,7 +541,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _remember_view(self, t: DocTab):
-        """다시 열 때 그 자리로: 최근 파일 항목에 마지막 쪽·쪽 안 높이·가로 스크롤·확대·보기 방식을 적는다(알PDF RecentFiles.ini 와 같음)."""
+        """다시 열 때 그 자리로: 최근 파일 항목에 마지막 쪽·쪽 안 높이·가로 스크롤·확대·보기 방식을 적는다(RecentFiles.ini 와 같음)."""
         if not t.doc.path or not t.viewer.items:
             return
         v = t.viewer
@@ -829,7 +829,7 @@ class MainWindow(QMainWindow):
                 col = {"gray": theme.CANVAS, "white": "#FFFFFF", "dark": "#2B2B2E", "sepia": "#F1E7D0"}[key[7:]]
                 v.setBackgroundBrush(QColor(col))
             elif key.startswith("rotate_view_"):
-                # 보기 회전 = 모든 쪽 회전(저장되는 회전). 알PDF 도 저장되는 쪽으로 동작한다.
+                # 보기 회전 = 모든 쪽 회전(저장되는 회전). 일반적인 PDF 편집기도 저장되는 쪽으로 동작한다.
                 P.rotate(d, range(d.page_count), 90 if key.endswith("cw") else -90); t.changed(None, structural=True)
             elif key == "fullscreen":
                 if self.isFullScreen(): self.showNormal(); self.ribbon.show(); self.status.show()
@@ -1541,7 +1541,7 @@ class MainWindow(QMainWindow):
     def form_data(self, t: DocTab, how: str):
         T = _engine("tools")
         if how == "export":
-            # FDF·XFDF 는 알PDF·아크로뱃과 주고받는 표준 꼴(기본), JSON·CSV 는 엑셀 등으로 볼 때
+            # FDF·XFDF 는 다른 PDF 편집기·아크로뱃과 주고받는 표준 꼴(기본), JSON·CSV 는 엑셀 등으로 볼 때
             out, sel = QFileDialog.getSaveFileName(self, "양식 데이터 내보내기", self._suggest(t, ".fdf"),
                                                    "FDF (*.fdf);;XFDF (*.xfdf);;JSON (*.json);;CSV (*.csv)")
             if out:
@@ -1578,7 +1578,7 @@ class MainWindow(QMainWindow):
             return
         vals = dlg.values()
         if not dlg.to_new_file():
-            # 알PDF 처럼 열린 문서에 걸어 두고 다음 저장 때 파일에 건다(Document.save 가 security 를 본다)
+            # 일반적인 PDF 편집기처럼 열린 문서에 걸어 두고 다음 저장 때 파일에 건다(Document.save 가 security 를 본다)
             t.doc.security = vals; t.doc.modified = True; t.changed(None)
             self.say(f"저장하면 암호가 걸립니다 · {dict(D.EncryptDialog.METHODS)[vals['method']].split(' · ')[0]}")
             return
@@ -1699,7 +1699,7 @@ class MainWindow(QMainWindow):
 
     # ── 인쇄·메일·속성·설정·도움말 ──────────────────────────────
     def print_doc(self, t: DocTab):
-        """알PDF 와 같은 인쇄 창(미리보기·크기·포스터·여러 페이지·소책자·양면·흑백). 고른 설정은 다음에도 그대로."""
+        """인쇄 창(미리보기·크기·포스터·여러 페이지·소책자·양면·흑백). 고른 설정은 다음에도 그대로."""
         from .printing import PrintDialog, send
         if not QPrinterInfo.availablePrinterNames():
             QMessageBox.warning(self, "인쇄", "이 PC 에 설치된 프린터가 없습니다"); return
@@ -1790,7 +1790,9 @@ class MainWindow(QMainWindow):
 
     def show_help(self):
         QMessageBox.information(self, "도움말",
-                                f"{APP_NAME} (알PDF 대체)\n\n"
+                                f"{APP_NAME} {VERSION}: 개인이 만든 무료 비영리 프로그램\n"
+                                "이스트소프트 「알PDF」와 관계없음(알PDF 는 (주)이스트소프트의 상표)\n"
+                                "소스는 AGPL-3.0 으로 공개(github.com/kyijgnes/rpdf), 오픈소스 고지는 설치 폴더 THIRD-PARTY-NOTICES.txt\n\n"
                                 "홈: 손·선택·확대, 모두 편집(원문 글자·그림 고치기), 텍스트 추가, OCR, 자르기, 검색\n"
                                 "편집: 텍스트·이미지·링크 추가, 워터마크·배경·머리글/바닥글·베이츠 번호\n"
                                 "주석: 연필·지우개·강조·밑줄·취소선·글상자·말풍선·노트·도형·스탬프·서명·첨부·측정\n"

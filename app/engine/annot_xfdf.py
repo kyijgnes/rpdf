@@ -1,4 +1,4 @@
-"""주석 XFDF·FDF 내보내기·가져오기(알PDF·아크로뱃과 주고받는 꼴).
+"""주석 XFDF·FDF 내보내기·가져오기(다른 PDF 편집기·아크로뱃과 주고받는 꼴).
 
 길: export_annots 자료(쪽 좌표) ⇄ PDF 좌표 기록(_Rec, 아래 칸 이름) ⇄ XFDF(XML) / FDF(PDF 문법).
 가져오기는 결국 import_annots 와 같은 _import_one 으로 되살린다. 첨부 파일 주석은 파일 내용을 못 담아 뺀다.

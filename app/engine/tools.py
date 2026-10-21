@@ -151,7 +151,7 @@ def _text_width(text: str, fontsize: float) -> float:
 
 
 # ── 압축 ────────────────────────────────────────────────────────────────
-# 알PDF 단계값(높음 72dpi·45 / 중간 120dpi·70 / 낮음 150dpi·85). 목표 해상도보다 10% 넘게 고운 그림만 줄인다
+# 단계값(높음 72dpi·45 / 중간 120dpi·70 / 낮음 150dpi·85). 목표 해상도보다 10% 넘게 고운 그림만 줄인다
 # (조금 넘는 것까지 다시 줄이면 화질만 깎인다. 문턱을 1/4 위로 두었더니 흔한 150dpi 스캔이 중간에서 안 줄었다)
 _LEVELS = {
     "high": dict(dpi_threshold=80, dpi_target=72, quality=45),
@@ -442,7 +442,7 @@ def header_footer(doc: fitz.Document, left: str = "", center: str = "", right: s
                   total: int | None = None) -> None:
     """머리글·바닥글 여섯 자리. 자리표: {page} {total} {date} {file}. in place.
 
-    {total} 은 (적용할 쪽 수 + 첫 번호 - 1), 곧 마지막 쪽에 찍히는 번호다(알PDF 의 n). total 로 따로 줄 수 있다."""
+    {total} 은 (적용할 쪽 수 + 첫 번호 - 1), 곧 마지막 쪽에 찍히는 번호다(n). total 로 따로 줄 수 있다."""
     col = _color(color) or (0, 0, 0)
     date_s = _dt.datetime.now().strftime(date_format)
     fname = file_name if file_name is not None else _file_stem(doc)
@@ -473,7 +473,7 @@ def bates_numbers(doc: fitz.Document, prefix: str = "", start: int = 1, digits: 
                   pages=None, color=(0, 0, 0), reverse: bool = False, margin_mm: float = 12) -> None:
     """베이츠 번호(접두어 + 0 채운 번호 + 접미어). position: header_/footer_ + left/center/right. in place.
 
-    reverse: 마지막 쪽이 start 이고 앞으로 갈수록 커진다(알PDF 「베이츠 번호 거꾸로」)."""
+    reverse: 마지막 쪽이 start 이고 앞으로 갈수록 커진다(「베이츠 번호 거꾸로」)."""
     col = _color(color) or (0, 0, 0)
     pos = position.lower()
     vy, _, hx = pos.partition("_")
@@ -491,7 +491,7 @@ def bates_numbers(doc: fitz.Document, prefix: str = "", start: int = 1, digits: 
         _write_text(page, (x, y), s, font_size, col)
 
 
-# 쪽 번호 모양(화면 이름, 머리글 자리표). 쪽 번호는 머리글/바닥글 한 칸에 번호만 든 것이다(알PDF 와 같은 뜻)
+# 쪽 번호 모양(화면 이름, 머리글 자리표). 쪽 번호는 머리글/바닥글 한 칸에 번호만 든 것이다(뜻)
 PAGE_NUMBER_STYLES = [("1", "{page}"), ("1 / n", "{page} / {total}"), ("- 1 -", "- {page} -"),
                       ("페이지 1", "페이지 {page}"), ("n 페이지 중 1", "{total} 페이지 중 {page}")]
 HF_SLOTS = ("left", "center", "right", "footer_left", "footer_center", "footer_right")  # header_footer 의 여섯 칸 이름
@@ -509,7 +509,7 @@ def page_numbers(doc: fitz.Document, style: str = "{page}", position: str = "foo
 
 # ── 꾸미기 표시: 넣은 것을 나중에 찾아 고치고 지운다 ─────────────────────
 # 꾸미기 하나를 쪽마다 폼 객체(XObject) 하나로 넣고, 그 객체에 /RPDFDeco(종류)·/RPDFSet(설정 JSON)을 단다.
-# 그냥 글·그림으로 그리면 본문과 섞여 다시 찾을 수 없었다(알PDF 의 추가·업데이트·삭제를 따라 함).
+# 그냥 글·그림으로 그리면 본문과 섞여 다시 찾을 수 없었다(의 추가·업데이트·삭제를 따라 함).
 DECO_KINDS = {"watermark": "워터마크", "background": "배경", "header_footer": "머리글 & 바닥글",
               "page_number": "쪽 번호", "bates": "베이츠 번호"}
 
@@ -830,7 +830,7 @@ def set_page_labels(doc: fitz.Document, start_page: int = 0, style: str = "D",
 
 
 # ── 보안 ────────────────────────────────────────────────────────────────
-# 암호화 방식(알PDF 와 같은 셋, 기본 128 bit AES)
+# 암호화 방식(셋, 기본 128 bit AES)
 ENCRYPT_METHODS = {"aes128": fitz.PDF_ENCRYPT_AES_128, "aes256": fitz.PDF_ENCRYPT_AES_256, "rc4": fitz.PDF_ENCRYPT_RC4_128}
 
 
@@ -862,7 +862,7 @@ def encrypt_bytes(doc: fitz.Document, user_pw: str = "", owner_pw: str = "", met
                   allow_annotate: bool = True, allow_forms: bool = True, allow_accessibility: bool = True,
                   allow_assemble: bool = True, allow_print_hq: bool = True) -> tuple[bytes, str]:
     """암호를 건 PDF 바이트와 다시 열 때 쓸 권한 암호. 열린 문서에 걸 때는 Document.security 에 이 인자를 넣어 두면
-    다음 저장에서 이것으로 쓴다(알PDF 「암호화」 와 같은 흐름. 창을 닫는 순간 파일이 바뀌지 않음)."""
+    다음 저장에서 이것으로 쓴다(「암호화」 와 같은 흐름. 창을 닫는 순간 파일이 바뀌지 않음)."""
     check_encrypt_args(user_pw, owner_pw, method)
     perm = 0
     for flag, allowed in (
@@ -1341,7 +1341,7 @@ def _fill_values(doc: fitz.Document, values: dict[str, object]) -> int:
     return len(done)
 
 
-# FDF·XFDF: 다른 PDF 프로그램(알PDF·아크로뱃)과 양식 값을 주고받는 표준 꼴
+# FDF·XFDF: 다른 PDF 프로그램(다른 PDF 편집기·아크로뱃)과 양식 값을 주고받는 표준 꼴
 def _fdf_value(v, kind: int) -> str:
     if kind in (fitz.PDF_WIDGET_TYPE_CHECKBOX, fitz.PDF_WIDGET_TYPE_RADIOBUTTON):
         name = "Off" if v in (None, "", False, "Off") else ("Yes" if v is True else str(v))
@@ -1556,7 +1556,7 @@ def set_form_defaults(doc: fitz.Document) -> int:
 def align_widgets(doc: fitz.Document, items: Sequence[tuple[int, int]], how: str) -> int:
     """양식 칸 여럿을 맞춘다. items=(쪽, xref). 맞춘 칸 수. in place.
 
-    how: left·right·top·bottom·hcenter·vcenter 는 고른 칸을 다 합친 사각형 기준(알PDF 와 같음),
+    how: left·right·top·bottom·hcenter·vcenter 는 고른 칸을 다 합친 사각형 기준,
          page_h·page_v·page_both 는 쪽 가운데, dist_h·dist_v 는 같은 간격으로 벌리기(셋 이상)."""
     held = {}
     ws = []
@@ -1695,7 +1695,7 @@ def print_pdf(path: str, printer: str | None = None, pages: Iterable[int] | None
                 win32api.ShellExecute(0, "print", send, None, ".", 0)
         except Exception as e:
             if getattr(e, "winerror", None) == 31 or (e.args and e.args[0] == 31):
-                # SE_ERR_NOASSOC: PDF 기본 앱에 「인쇄」 동작이 없다(알PDF·이 앱 둘 다). 윈도우 문구는 엉뚱하다
+                # SE_ERR_NOASSOC: PDF 기본 앱에 「인쇄」 동작이 없다(다른 PDF 편집기·이 앱 둘 다). 윈도우 문구는 엉뚱하다
                 raise EngineError(f"PDF 기본 앱에 인쇄 기능이 없어 보내지 못했습니다({APP_NAME}의 인쇄·일괄 인쇄를 쓰세요)") from e
             raise EngineError(f"인쇄를 보내지 못했습니다 ({e})") from e
     return send
