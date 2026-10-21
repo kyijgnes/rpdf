@@ -791,12 +791,20 @@ class MainWindow(QMainWindow):
                 n = A.recognize_fields(d); t.changed(None); self.say(f"양식 칸 {n}개를 만들었습니다")
             elif key == "form_export": self.form_data(t, "export")
             elif key == "form_import": self.form_data(t, "import")
-            elif key == "form_reset": A.reset_fields(d); t.changed(None)
+            elif key == "form_reset": d.snapshot(); _engine("tools").reset_form(d.fitz); t.changed(None)   # 칸마다 기본값으로
+            elif key == "form_set_default":
+                d.snapshot(); n = _engine("tools").set_form_defaults(d.fitz); t.changed(None); self.say(f"{n}칸의 지금 값을 기본값으로 정했습니다")
             elif key == "form_preview": v.set_form_mode(False); self.ribbon.set_toggle("form_edit", False); self.say("미리보기: 칸을 두 번 눌러 값을 넣습니다")
             elif key.startswith("align_"):
-                items = [(v.sel.page, v.sel.xref)] if v.sel and v.sel.kind == "widget" else []
-                if len(items) < 1: self.say("맞출 양식 칸을 먼저 고르세요"); return
-                A.align_fields(d, items, key[6:]); t.changed([v.sel.page])
+                # 뷰어는 칸을 하나만 고르므로, 그 쪽의 칸을 창에서 여럿 골라 맞춘다
+                pg = v.sel.page if v.sel and v.sel.kind == "widget" else v.current
+                ws = [(w.xref, w.field_name, w.field_type_string) for w in d.fitz[pg].widgets()]
+                if not ws: self.say("이 쪽에는 양식 칸이 없습니다"); return
+                dlg = D.FieldAlignDialog(self, pg, ws, {v.sel.xref} if v.sel and v.sel.kind == "widget" else set(), key[6:])
+                if not dlg.exec(): return
+                vals = dlg.values()
+                if not vals["xrefs"]: self.say("맞출 칸을 고르세요"); return
+                d.snapshot(); _engine("tools").align_widgets(d.fitz, [(pg, x) for x in vals["xrefs"]], vals["how"]); t.changed([pg])
             # 보안
             elif key == "encrypt": self.encrypt(t)
             elif key == "decrypt": self.decrypt(t)
@@ -1403,10 +1411,15 @@ class MainWindow(QMainWindow):
     def form_data(self, t: DocTab, how: str):
         T = _engine("tools")
         if how == "export":
-            out, _ = QFileDialog.getSaveFileName(self, "양식 데이터 내보내기", self._suggest(t, "_양식.json"), "JSON (*.json);;CSV (*.csv)")
-            if out: T.export_form_data(t.doc.fitz, out); self._offer_open(out)
+            # FDF·XFDF 는 알PDF·아크로뱃과 주고받는 표준 꼴(기본), JSON·CSV 는 엑셀 등으로 볼 때
+            out, sel = QFileDialog.getSaveFileName(self, "양식 데이터 내보내기", self._suggest(t, ".fdf"),
+                                                   "FDF (*.fdf);;XFDF (*.xfdf);;JSON (*.json);;CSV (*.csv)")
+            if out:
+                ext = {"FDF": ".fdf", "XFDF": ".xfdf", "JSON": ".json", "CSV": ".csv"}.get(sel.split(" ")[0], "")
+                if ext and not out.lower().endswith(ext): out = os.path.splitext(out)[0] + ext
+                T.export_form_data(t.doc.fitz, out, pdf_name=t.doc.name); self.say(f"양식 데이터를 저장했습니다: {out}")
         else:
-            p, _ = QFileDialog.getOpenFileName(self, "양식 데이터 가져오기", "", "JSON (*.json)")
+            p, _ = QFileDialog.getOpenFileName(self, "양식 데이터 가져오기", "", "양식 데이터 (*.fdf *.xfdf *.json *.csv)")
             if p:
                 t.doc.snapshot(); n = T.import_form_data(t.doc.fitz, p); t.changed(None); self.say(f"{n}칸을 채웠습니다")
 

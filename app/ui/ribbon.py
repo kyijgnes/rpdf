@@ -98,9 +98,11 @@ TABS: list[tuple[str, str, list]] = [
         ("fcombo", "fcombo", "콤보 박스", "tool", None), ("flist", "flist", "목록 박스", "tool", None), ("fbutton", "fbutton", "누름 버튼", "tool", None),
         ("fimage", "fimage", "이미지 칸", "tool", None), ("fsign", "fsign", "서명 칸", "tool", None), ("fdate", "fdate", "날짜 칸", "tool", None), SEP,
         ("recognize", "recognize", "양식 인식", "action", None), ("form_export", "export", "데이터 추출", "action", None),
-        ("form_more", "more", "더보기", "menu", [("form_import", "데이터 가져오기"), ("form_reset", "초기화"), ("form_preview", "미리보기"),
+        ("form_more", "more", "더보기", "menu", [("form_import", "데이터 가져오기"), ("form_reset", "기본값으로 되돌리기"),
+                                                 ("form_set_default", "지금 값을 기본값으로"), ("form_preview", "미리보기"),
                                                  ("align_left", "정렬: 왼쪽"), ("align_right", "정렬: 오른쪽"), ("align_top", "정렬: 위"),
                                                  ("align_bottom", "정렬: 아래"), ("align_hcenter", "정렬: 가로 가운데"), ("align_vcenter", "정렬: 세로 가운데"),
+                                                 ("align_dist_h", "정렬: 가로로 같은 간격"), ("align_dist_v", "정렬: 세로로 같은 간격"),
                                                  ("align_page_both", "페이지 가운데")]),
     ]),
     ("protect", "보안", [

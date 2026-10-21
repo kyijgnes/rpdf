@@ -1186,11 +1186,21 @@ def _form_values(fields: list[dict]) -> dict[str, object]:
     return data
 
 
-def export_form_data(doc: fitz.Document, out_path: str) -> str:
-    """양식 값을 JSON(기본) 또는 CSV(.csv) 로."""
+def export_form_data(doc: fitz.Document, out_path: str, pdf_name: str | None = None) -> str:
+    """양식 값을 FDF(.fdf)·XFDF(.xfdf)·CSV(.csv)·JSON(그 밖) 으로. pdf_name: FDF 에 적을 원본 PDF 이름."""
     fields = form_fields(doc)
     data = _form_values(fields)
-    if out_path.lower().endswith(".csv"):
+    ext = os.path.splitext(out_path)[1].lower()
+    if ext in (".fdf", ".xfdf"):
+        kinds = {fd["name"]: fd["type_id"] for fd in fields}
+        if pdf_name is None:   # 바이트로 연 문서는 이름이 「pdf」 다
+            pdf_name = os.path.basename(getattr(doc, "name", "") or "")
+            pdf_name = pdf_name if pdf_name.lower().endswith(".pdf") else ""
+        text = (_fdf_text if ext == ".fdf" else _xfdf_text)(data, kinds, pdf_name)
+        with open(out_path, "wb") as f:
+            f.write(text if isinstance(text, bytes) else text.encode("utf-8"))
+        return out_path
+    if ext == ".csv":
         first = {}
         for fd in fields:
             first.setdefault(fd["name"], fd)
@@ -1209,9 +1219,18 @@ _ON = ("1", "true", "yes", "on", "예")
 
 
 def import_form_data(doc: fitz.Document, path: str) -> int:
-    """JSON({name: value} 또는 {"fields": {...}}) · CSV(name,value 열) 를 읽어 채운다. 채운 칸 이름 수. in place."""
+    """FDF · XFDF · JSON({name: value} 또는 {"fields": {...}}) · CSV(name,value 열) 를 읽어 채운다. 채운 칸 이름 수. in place."""
     values: dict[str, object] = {}
-    if path.lower().endswith(".csv"):
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".fdf", ".xfdf"):
+        with open(path, "rb") as f:
+            raw = f.read()
+        try:
+            values = _read_fdf(raw) if ext == ".fdf" else _read_xfdf(raw)
+        except Exception as e:  # noqa: BLE001
+            raise EngineError(f"양식 자료 파일을 읽지 못했습니다: {os.path.basename(path)}") from e
+        return _fill_values(doc, values)
+    if ext == ".csv":
         with open(path, encoding="utf-8-sig", newline="") as f:
             rd = csv.DictReader(f)
             for row in rd:
@@ -1225,6 +1244,10 @@ def import_form_data(doc: fitz.Document, path: str) -> int:
         if not isinstance(data, dict):
             raise EngineError("양식 자료 파일 모양이 맞지 않습니다")
         values = data
+    return _fill_values(doc, values)
+
+
+def _fill_values(doc: fitz.Document, values: dict[str, object]) -> int:
     done: set[str] = set()
     for page in doc:
         radios = []
@@ -1238,8 +1261,10 @@ def import_form_data(doc: fitz.Document, path: str) -> int:
             if w.field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX:
                 on = (w.on_state() or "").lower()
                 w.field_value = bool(v) if not isinstance(v, str) else v.strip().lower() in _ON + (on,)
+            elif isinstance(v, (list, tuple)) and w.field_type == fitz.PDF_WIDGET_TYPE_LISTBOX:
+                w.field_value = [str(x) for x in v]
             else:
-                w.field_value = "" if v is None else str(v)
+                w.field_value = "" if v is None else (", ".join(map(str, v)) if isinstance(v, (list, tuple)) else str(v))
             save_widget(w)
             done.add(w.field_name)
         radios.sort(key=lambda w: str(values[w.field_name]) == (w.on_state() or ""))
@@ -1250,11 +1275,267 @@ def import_form_data(doc: fitz.Document, path: str) -> int:
     return len(done)
 
 
+# FDF·XFDF: 다른 PDF 프로그램(알PDF·아크로뱃)과 양식 값을 주고받는 표준 꼴
+def _fdf_value(v, kind: int) -> str:
+    if kind in (fitz.PDF_WIDGET_TYPE_CHECKBOX, fitz.PDF_WIDGET_TYPE_RADIOBUTTON):
+        name = "Off" if v in (None, "", False, "Off") else ("Yes" if v is True else str(v))
+        return "/" + re.sub(r"[^!-~]|[()<>\[\]{}/%#]", lambda m: "#%02X" % ord(m.group()) if ord(m.group()) < 256 else "", name)
+    if isinstance(v, (list, tuple)):
+        return "[" + " ".join(fitz.get_pdf_str(str(x)) for x in v) + "]"
+    return fitz.get_pdf_str("" if v is None else str(v))
+
+
+def _fdf_text(data: dict, kinds: dict, pdf_name: str) -> bytes:
+    rows = "\n".join(f"<</T {fitz.get_pdf_str(name)} /V {_fdf_value(v, kinds.get(name, 0))}>>" for name, v in data.items())
+    body = (f"%FDF-1.2\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<</FDF <</Fields [\n{rows}\n]"
+            + (f" /F {fitz.get_pdf_str(pdf_name)}" if pdf_name else "") + ">> >>\nendobj\ntrailer\n<</Root 1 0 R>>\n%%EOF\n")
+    return body.encode("latin-1", errors="replace")
+
+
+def _xfdf_text(data: dict, kinds: dict, pdf_name: str) -> str:
+    from xml.sax.saxutils import escape, quoteattr
+    out = ['<?xml version="1.0" encoding="UTF-8"?>', '<xfdf xmlns="http://ns.adobe.com/xfdf/" xml:space="preserve">']
+    if pdf_name:
+        out.append(f"<f href={quoteattr(pdf_name)}/>")
+    out.append("<fields>")
+    for name, v in data.items():
+        if kinds.get(name) in (fitz.PDF_WIDGET_TYPE_CHECKBOX, fitz.PDF_WIDGET_TYPE_RADIOBUTTON):
+            v = "Off" if v in (None, "", False, "Off") else ("Yes" if v is True else v)
+        vals = v if isinstance(v, (list, tuple)) else [v]
+        out.append(f"<field name={quoteattr(name)}>" + "".join(f"<value>{escape('' if x is None else str(x))}</value>" for x in vals) + "</field>")
+    out += ["</fields>", "</xfdf>", ""]
+    return "\n".join(out)
+
+
+def _read_xfdf(raw: bytes) -> dict[str, object]:
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(raw)
+    out: dict[str, object] = {}
+
+    def walk(el, prefix: str):
+        for f in el:
+            if f.tag.rsplit("}", 1)[-1] != "field":
+                continue
+            name = f"{prefix}.{f.get('name')}" if prefix else (f.get("name") or "")
+            vals = [v.text or "" for v in f if v.tag.rsplit("}", 1)[-1] in ("value", "value-richtext")]
+            if vals:
+                out[name] = vals[0] if len(vals) == 1 else vals
+            walk(f, name)   # 점으로 이은 이름은 칸 안의 칸으로 들어 있다
+
+    for fields in root.iter():
+        if fields.tag.rsplit("}", 1)[-1] == "fields":
+            walk(fields, "")
+    return out
+
+
+_PDF_TOKEN = re.compile(rb"\s*(<<|>>|\[|\]|\(|<[0-9A-Fa-f\s]*>|/[^\s/<>\[\]()%]*|[^\s/<>\[\]()%]+|%[^\r\n]*)")
+
+
+def _pdf_parse(raw: bytes, pos: int = 0):
+    """FDF 안의 PDF 값 하나를 읽는다 → (값, 다음 자리). 사전은 dict, 배열은 list, 이름은 '/이름', 글은 str."""
+    while True:
+        m = _PDF_TOKEN.match(raw, pos)
+        if not m:
+            raise ValueError("FDF 를 읽지 못했습니다")
+        tok, pos = m.group(1), m.end()
+        if not tok.startswith(b"%"):
+            break
+    if tok == b"<<":
+        d = {}
+        while True:
+            m = re.compile(rb"\s*(>>|/[^\s/<>\[\]()%]*)").match(raw, pos)
+            if m.group(1) == b">>":
+                return d, m.end()
+            key, pos = m.group(1)[1:].decode("latin-1"), m.end()
+            d[key], pos = _pdf_parse(raw, pos)
+    if tok == b"[":
+        arr = []
+        while True:
+            m = re.compile(rb"\s*\]").match(raw, pos)
+            if m:
+                return arr, m.end()
+            v, pos = _pdf_parse(raw, pos)
+            arr.append(v)
+    if tok == b"(":
+        buf, depth, k = bytearray(), 1, pos
+        esc = {ord("n"): b"\n", ord("r"): b"\r", ord("t"): b"\t", ord("b"): b"\b", ord("f"): b"\f"}
+        while k < len(raw):
+            c = raw[k]
+            if c == 0x5C:  # \
+                n = raw[k + 1]
+                if n in esc:
+                    buf += esc[n]; k += 2
+                elif 0x30 <= n <= 0x37:
+                    oct_ = re.match(rb"[0-7]{1,3}", raw[k + 1:k + 4]).group()
+                    buf.append(int(oct_, 8) & 255); k += 1 + len(oct_)
+                elif n in (0x0D, 0x0A):
+                    k += 2 + (n == 0x0D and raw[k + 2:k + 3] == b"\n")
+                else:
+                    buf.append(n); k += 2
+                continue
+            if c == 0x28:
+                depth += 1
+            elif c == 0x29:
+                depth -= 1
+                if depth == 0:
+                    return _pdf_text(bytes(buf)), k + 1
+            buf.append(c); k += 1
+        raise ValueError("글이 끝나지 않았습니다")
+    if tok.startswith(b"<"):
+        h = re.sub(rb"\s", b"", tok[1:-1])
+        return _pdf_text(bytes.fromhex((h + b"0" * (len(h) % 2)).decode())), pos
+    if tok.startswith(b"/"):
+        return "/" + re.sub(r"#([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), tok[1:].decode("latin-1")), pos
+    m = re.compile(rb"\s+(\d+)\s+R(?![^\s/<>\[\]()%])").match(raw, pos) if tok.isdigit() else None
+    if m:   # 「12 0 R」: 따로 적힌 객체를 가리킨다
+        return ("ref", int(tok)), m.end()
+    return tok.decode("latin-1"), pos   # 숫자·true·false
+
+
+def _pdf_text(b: bytes) -> str:
+    if b.startswith(b"\xfe\xff"):
+        return b[2:].decode("utf-16-be", errors="replace")
+    if b.startswith(b"\xef\xbb\xbf"):
+        return b[3:].decode("utf-8", errors="replace")
+    return b.decode("latin-1")
+
+
+def _read_fdf(raw: bytes) -> dict[str, object]:
+    k = raw.find(b"/Fields")
+    if k < 0:
+        return {}
+    fields, _ = _pdf_parse(raw, k + len(b"/Fields"))
+    out: dict[str, object] = {}
+
+    def deref(v, depth=0):
+        if isinstance(v, tuple) and depth < 4:
+            m = re.search(rb"(?<!\d)%d\s+0\s+obj" % v[1], raw)
+            return deref(_pdf_parse(raw, m.end())[0], depth + 1) if m else None
+        return v
+
+    def walk(items, prefix: str):
+        items = deref(items)
+        for f in items if isinstance(items, list) else []:
+            f = deref(f)
+            if not isinstance(f, dict):
+                continue
+            f = {key: deref(val) for key, val in f.items()}
+            name = f"{prefix}.{f.get('T', '')}" if prefix else str(f.get("T", ""))
+            if "V" in f:
+                v = f["V"]
+                out[name] = v[1:] if isinstance(v, str) and v.startswith("/") else v
+            walk(f.get("Kids"), name)
+
+    walk(fields, "")
+    return out
+
+
+def _field_key(doc: fitz.Document, xref: int, key: str) -> tuple[str, str]:
+    """칸의 열쇠 값. 없으면 부모(라디오 묶음 등)에서 물려받은 것."""
+    for _ in range(8):
+        t, v = doc.xref_get_key(xref, key)
+        if t != "null":
+            return t, v
+        pt, pv = doc.xref_get_key(xref, "Parent")
+        if pt != "xref":
+            break
+        xref = int(pv.split()[0])
+    return "null", ""
+
+
 def reset_form(doc: fitz.Document) -> None:
-    """양식 값을 전부 비운다. in place."""
+    """양식 값을 칸마다 저장된 기본값(DV)으로 되돌린다. 기본값이 없는 칸은 비운다. in place."""
+    for page in doc:
+        radios = []
+        for w in page.widgets():
+            t, dv = _field_key(doc, w.xref, "DV")
+            if w.field_type in (fitz.PDF_WIDGET_TYPE_RADIOBUTTON, fitz.PDF_WIDGET_TYPE_CHECKBOX):
+                on = t == "name" and dv == "/" + (w.on_state() or "")
+                if w.field_type == fitz.PDF_WIDGET_TYPE_RADIOBUTTON:
+                    radios.append((on, w)); continue
+                w.field_value = on
+                save_widget(w)
+            elif t == "string":
+                w.field_value = dv   # xref_get_key 는 글을 풀어서 준다
+                save_widget(w)
+            elif t == "array" and w.field_type == fitz.PDF_WIDGET_TYPE_LISTBOX:
+                w.field_value = [x for x in re.findall(r"\((.*?)\)", dv)]
+                save_widget(w)
+            else:
+                reset_widget(w)
+        for on, w in sorted(radios, key=lambda r: r[0]):   # 끌 것 먼저, 켤 것 나중
+            w.field_value = on
+            save_widget(w)
+
+
+def set_form_defaults(doc: fitz.Document) -> int:
+    """지금 값을 칸마다 기본값(DV)으로 적는다(「재설정」 이 이 값으로 돌아감). 적은 칸 수. in place."""
+    n = 0
+    seen: set[int] = set()
     for page in doc:
         for w in page.widgets():
-            reset_widget(w)
+            holder = w.xref
+            pt, pv = doc.xref_get_key(w.xref, "Parent")
+            if w.field_type == fitz.PDF_WIDGET_TYPE_RADIOBUTTON and pt == "xref":
+                holder = int(pv.split()[0])   # 라디오는 묶음(부모)에 값이 있다
+            if holder in seen:
+                continue
+            seen.add(holder)
+            t, v = _field_key(doc, holder, "V")
+            doc.xref_set_key(holder, "DV", fitz.get_pdf_str(v) if t == "string" else v if t != "null" else "null")
+            n += 1
+    return n
+
+
+def align_widgets(doc: fitz.Document, items: Sequence[tuple[int, int]], how: str) -> int:
+    """양식 칸 여럿을 맞춘다. items=(쪽, xref). 맞춘 칸 수. in place.
+
+    how: left·right·top·bottom·hcenter·vcenter 는 고른 칸을 다 합친 사각형 기준(알PDF 와 같음),
+         page_h·page_v·page_both 는 쪽 가운데, dist_h·dist_v 는 같은 간격으로 벌리기(셋 이상)."""
+    held = {}
+    ws = []
+    for pg, xref in items:
+        p = held.setdefault(pg, doc[pg])   # 쪽을 붙잡아 둔다(놓치면 update 가 「Annot is not bound to a page」)
+        ws += [(pg, w) for w in p.widgets() if w.xref == xref]
+    if not ws:
+        return 0
+    rects = [fitz.Rect(w.rect) for _, w in ws]
+    u = fitz.Rect(rects[0])
+    for r in rects[1:]:
+        u |= r
+    new = [fitz.Rect(r) for r in rects]
+    if how in ("dist_h", "dist_v"):
+        if len(ws) < 3:
+            raise EngineError("같은 간격으로 벌리려면 칸을 셋 이상 고르세요")
+        a = 0 if how == "dist_h" else 1
+        order = sorted(range(len(rects)), key=lambda k: (rects[k].x0, rects[k].y0)[a])
+        size = sum((rects[k].width, rects[k].height)[a] for k in order)
+        span = (u.width, u.height)[a]
+        gap = (span - size) / (len(order) - 1)
+        pos = (u.x0, u.y0)[a]
+        for k in order:
+            r = new[k]
+            if a == 0:
+                r.x1, r.x0 = pos + r.width, pos
+            else:
+                r.y1, r.y0 = pos + r.height, pos
+            pos += (r.width, r.height)[a] + gap
+    for (pg, _), r in zip(ws, new):
+        page_r = held[pg].rect
+        w_, h_ = r.width, r.height
+        if how == "left": r.x0 = u.x0
+        elif how == "right": r.x0 = u.x1 - w_
+        elif how == "top": r.y0 = u.y0
+        elif how == "bottom": r.y0 = u.y1 - h_
+        elif how == "hcenter": r.x0 = (u.x0 + u.x1 - w_) / 2
+        elif how == "vcenter": r.y0 = (u.y0 + u.y1 - h_) / 2
+        if how in ("page_h", "page_both"): r.x0 = (page_r.width - w_) / 2
+        if how in ("page_v", "page_both"): r.y0 = (page_r.height - h_) / 2
+        r.x1, r.y1 = r.x0 + w_, r.y0 + h_
+    for (_, w), r in zip(ws, new):
+        w.rect = r
+        save_widget(w)
+    return len(ws)
 
 
 def extract_data(docs_paths: Sequence[str], out_xlsx: str, progress: Progress = None) -> str:

@@ -439,6 +439,81 @@ def test_radio_group_export_import(tmp_path):
     assert [w.field_name for w in d.fitz[0].widgets()] == ["라디오 버튼", "라디오 버튼", "다른 묶음"]
 
 
+def _form_doc():
+    from app.engine import annots as A
+    d = _app_doc()
+    xs = {"text": A.add_field(d, 0, fitz.Rect(50, 300, 200, 320), "text", value="")}
+    xs["check"] = A.add_field(d, 0, fitz.Rect(50, 340, 64, 354), "checkbox")
+    xs["radios"] = [A.add_field(d, 0, fitz.Rect(50, 400 + 30 * k, 64, 414 + 30 * k), "radio") for k in range(3)]
+    return d, xs
+
+
+def _vals(d):
+    return {w.field_name + ("" if w.field_type != fitz.PDF_WIDGET_TYPE_RADIOBUTTON else f"#{w.on_state()}"): w.field_value
+            for w in d.fitz[0].widgets()}
+
+
+@pytest.mark.parametrize("ext", [".fdf", ".xfdf"])
+def test_form_fdf_xfdf_roundtrip(tmp_path, ext):
+    from app.engine import annots as A
+    d, xs = _form_doc()
+    A.set_field_value(d, 0, xs["text"], "한글 값 (괄호) \\ 끝")
+    A.set_field_value(d, 0, xs["check"], True)
+    A.set_field_value(d, 0, xs["radios"][2], True)
+    want = _vals(d)
+    out = str(tmp_path / ("f" + ext))
+    tools.export_form_data(d.fitz, out)
+    tools.reset_form(d.fitz)
+    assert _vals(d) != want
+    assert tools.import_form_data(d.fitz, out) == 3
+    assert _vals(d) == want
+
+
+def test_fdf_reads_indirect_and_kids():
+    raw = (b"%FDF-1.2\n1 0 obj <</FDF <</Fields [2 0 R <</T (a) /Kids [<</T (b) /V <FEFFD55C>>>]>>]>>>> endobj\n"
+           b"2 0 obj <</T (x\\(1\\)) /V /On>> endobj\ntrailer <</Root 1 0 R>>")
+    assert tools._read_fdf(raw) == {"x(1)": "On", "a.b": "한"}
+
+
+def test_form_reset_to_defaults():
+    from app.engine import annots as A
+    d, xs = _form_doc()
+    A.set_field_value(d, 0, xs["text"], "기본")
+    A.set_field_value(d, 0, xs["radios"][1], True)
+    assert tools.set_form_defaults(d.fitz) == 3
+    A.set_field_value(d, 0, xs["text"], "바꾼 값")
+    A.set_field_value(d, 0, xs["check"], True)
+    A.set_field_value(d, 0, xs["radios"][2], True)
+    tools.reset_form(d.fitz)
+    ws = list(d.fitz[0].widgets())
+    assert ws[0].field_value == "기본" and ws[1].field_value in ("Off", False, "")
+    assert [w.field_value for w in ws[2:]] == ["Off", "Choice2", "Off"]
+
+
+def test_align_widgets_union_and_distribute():
+    from app.engine import annots as A
+    d = _app_doc()
+    rs = [fitz.Rect(50, 300, 150, 320), fitz.Rect(120, 360, 260, 380), fitz.Rect(400, 420, 460, 440)]
+    xs = [A.add_field(d, 0, r, "text") for r in rs]
+    items = [(0, x) for x in xs]
+    tools.align_widgets(d.fitz, items, "hcenter")
+    cs = [(w.rect.x0 + w.rect.x1) / 2 for w in d.fitz[0].widgets()]
+    assert cs == pytest.approx([255] * 3)   # 합친 사각형(50~460)의 가운데
+    tools.align_widgets(d.fitz, items, "left")
+    assert [w.rect.x0 for w in d.fitz[0].widgets()] == pytest.approx([185] * 3)  # 가운데 맞춘 뒤 합친 사각형 왼쪽
+    tools.align_widgets(d.fitz, items, "dist_v")
+    ys = sorted((w.rect.y0, w.rect.y1) for w in d.fitz[0].widgets())
+    assert ys[1][0] - ys[0][1] == pytest.approx(ys[2][0] - ys[1][1]) and ys[0][0] == pytest.approx(300) and ys[2][1] == pytest.approx(440)
+    with pytest.raises(EngineError):
+        tools.align_widgets(d.fitz, items[:2], "dist_h")
+
+
+def test_page_subset_and_format_range():
+    from app.engine import pages as P
+    assert P.subset(range(6), "odd") == [0, 2, 4] and P.subset(P.parse_range("1-6", 6), "even") == [1, 3, 5]
+    assert P.format_range([0, 2, 3, 4, 7]) == "1,3-5,8"
+
+
 def test_resize_keeps_annots_links_fields():
     from app.engine import annots as A
     from app.engine import pages as P

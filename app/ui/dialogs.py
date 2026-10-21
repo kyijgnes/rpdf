@@ -215,6 +215,31 @@ class FieldPropsDialog(FormDialog):
                 "options": [l for l in self.options.toPlainText().splitlines() if l.strip()]}
 
 
+class FieldAlignDialog(FormDialog):
+    """한 쪽의 양식 칸을 여럿 골라 맞춘다. 뷰어에서 고른 칸은 미리 체크해 둔다."""
+    HOWS = [("left", "왼쪽 맞춤"), ("right", "오른쪽 맞춤"), ("top", "위쪽 맞춤"), ("bottom", "아래쪽 맞춤"),
+            ("hcenter", "가로 가운데"), ("vcenter", "세로 가운데"), ("dist_h", "가로로 같은 간격"), ("dist_v", "세로로 같은 간격"),
+            ("page_h", "쪽 가로 가운데"), ("page_v", "쪽 세로 가운데"), ("page_both", "쪽 한가운데")]
+
+    def __init__(self, parent, page_no: int, widgets: list[tuple[int, str, str]], picked: set[int], how: str):
+        super().__init__(f"양식 칸 맞추기 · {page_no + 1}쪽", parent, "맞추기")
+        self.list = QListWidget()
+        for xref, name, kind in widgets:
+            it = QListWidgetItem(f"{name}  ({kind})"); it.setData(Qt.ItemDataRole.UserRole, xref)
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Checked if xref in picked or not picked else Qt.CheckState.Unchecked)
+            self.list.addItem(it)
+        self.list.setMinimumHeight(min(320, 26 * len(widgets) + 8))
+        self.add("맞출 칸", self.list)
+        self.how = self.add("맞추기", QComboBox()); self.how.addItems([l for _, l in self.HOWS])
+        self.how.setCurrentIndex(next((k for k, (h, _) in enumerate(self.HOWS) if h == how), 0))
+
+    def values(self) -> dict:
+        xs = [self.list.item(k).data(Qt.ItemDataRole.UserRole) for k in range(self.list.count())
+              if self.list.item(k).checkState() == Qt.CheckState.Checked]
+        return {"xrefs": xs, "how": self.HOWS[self.how.currentIndex()][0]}
+
+
 def fill_field(parent, widget: fitz.Widget):
     """읽기 모드에서 칸 값 넣기."""
     t = widget.field_type
