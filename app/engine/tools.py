@@ -147,11 +147,18 @@ def _text_width(text: str, fontsize: float) -> float:
 
 
 # ── 압축 ────────────────────────────────────────────────────────────────
+# 알PDF 단계값(높음 72dpi·45 / 중간 120dpi·70 / 낮음 150dpi·85). 목표 해상도보다 1/4 넘게 고운 그림만 줄인다
+# (조금 넘는 것까지 다시 담으면 화질만 깎이고 크기는 거의 그대로다)
 _LEVELS = {
-    "low": dict(dpi_threshold=300, dpi_target=200, quality=85),
-    "medium": dict(dpi_threshold=200, dpi_target=150, quality=75),
-    "high": dict(dpi_threshold=150, dpi_target=100, quality=60),
+    "high": dict(dpi_threshold=90, dpi_target=72, quality=45),
+    "medium": dict(dpi_threshold=150, dpi_target=120, quality=70),
+    "low": dict(dpi_threshold=188, dpi_target=150, quality=85),
 }
+COMPRESS_LEVELS = ("high", "medium", "low")   # 화면 차례(기본은 첫째 「높음」)
+
+
+class NotSmaller(EngineError):
+    """압축해도 원본보다 작아지지 않았다(결과 파일은 만들지 않음)."""
 
 
 def _keep_copy(doc: fitz.Document, password: str | None = None) -> fitz.Document:
@@ -164,33 +171,53 @@ def _keep_copy(doc: fitz.Document, password: str | None = None) -> fitz.Document
         raise EngineError(str(e)) from e
 
 
-def compress(doc: fitz.Document, out_path: str, level: str = "medium",
-             progress: Progress = None, password: str | None = None) -> dict:
-    """그림을 다시 눌러 담고 쓰레기 객체를 걷어 저장. {"before": 바이트, "after": 바이트}. 암호는 그대로."""
+def compress(doc: fitz.Document, out_path: str, level: str = "high",
+             progress: Progress = None, password: str | None = None, remove_metadata: bool = True,
+             before: int | None = None) -> dict:
+    """그림을 다시 눌러 담고 쓰레기 객체를 걷어 저장. {"before": 바이트, "after": 바이트}. 암호는 그대로.
+
+    흑백(1비트) 그림도 같은 해상도로 줄인다. 원본보다 작아지지 않으면 out_path 를 만들지 않고 NotSmaller.
+    before: 원본 파일 크기(사본을 넘길 때. 없으면 doc.name 파일이나 지금 바이트 길이로 잰다)."""
     if level not in _LEVELS:
         raise EngineError(f"압축 단계가 잘못됐습니다: {level}")
     opt = _LEVELS[level]
     work = _keep_copy(doc, password)
     # 다시 쓴 바이트 길이가 아니라 실제 파일 크기와 대조한다(원본보다 커진 것도 줄었다고 보였다)
     # 사본을 encryption 없이 tobytes 하면 사본의 암호가 떨어져 KEEP 저장이 깨진다(길이만 잴 때도 KEEP)
-    before = os.path.getsize(doc.name) if doc.name and os.path.exists(doc.name) else len(doc.tobytes(encryption=fitz.PDF_ENCRYPT_KEEP))
+    if before is None:
+        before = os.path.getsize(doc.name) if doc.name and os.path.exists(doc.name) else len(doc.tobytes(encryption=fitz.PDF_ENCRYPT_KEEP))
+    tmp = out_path + ".rpdf-tmp"
     try:
         _say(progress, 0, 2, "그림 다시 담는 중")
         if hasattr(work, "rewrite_images"):
             try:
                 work.rewrite_images(dpi_threshold=opt["dpi_threshold"], dpi_target=opt["dpi_target"],
-                                    quality=opt["quality"], lossy=True, lossless=True, bitonal=False)
+                                    quality=opt["quality"], lossy=True, lossless=True, bitonal=True)
             except Exception:
                 _manual_recompress(work, opt, progress)
         else:
             _manual_recompress(work, opt, progress)
+        if remove_metadata:
+            work.set_metadata({})
+            try:
+                work.del_xml_metadata()
+            except Exception:  # noqa: BLE001
+                pass
         _say(progress, 1, 2, "저장하는 중")
         _subset(work)
-        work.save(out_path, garbage=4, deflate=True, clean=True, deflate_images=True, deflate_fonts=True,
+        work.save(tmp, garbage=4, deflate=True, clean=True, deflate_images=True, deflate_fonts=True,
                   encryption=fitz.PDF_ENCRYPT_KEEP)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
     finally:
         work.close()
-    after = os.path.getsize(out_path)
+    after = os.path.getsize(tmp)
+    if after >= before:  # 커진 파일을 「압축」 이라고 남기지 않는다
+        os.remove(tmp)
+        raise NotSmaller(f"더 줄일 수 없는 PDF 입니다(원본 {before / 1024:.0f} KB, 압축해 보니 {after / 1024:.0f} KB)")
+    os.replace(tmp, out_path)
     _say(progress, 2, 2, "압축 끝")
     return {"before": before, "after": after}
 

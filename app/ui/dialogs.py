@@ -526,14 +526,24 @@ class HiddenDataDialog(FormDialog):
 
 
 # ── 도구 ───────────────────────────────────────────────────────
+COMPRESS_CHOICES = [("high", "높음 · 이미지 72dpi, 용량 우선"), ("medium", "중간 · 이미지 120dpi"), ("low", "낮음 · 이미지 150dpi, 화질 우선")]
+
+
 class CompressDialog(FormDialog):
-    def __init__(self, parent, size_bytes: int):
+    """압축 정도는 마지막에 고른 것으로 연다(처음엔 높음)."""
+    def __init__(self, parent, size_bytes: int, level: str = "high", remove_metadata: bool = True):
         super().__init__("PDF 압축", parent, "압축")
         self.form.addRow("지금 크기", QLabel(f"{size_bytes / 1024:.0f} KB"))
-        self.level = self.add("정도", QComboBox()); self.level.addItems(["낮음(화질 우선)", "보통", "높음(용량 우선)"]); self.level.setCurrentIndex(1)
+        box = QWidget(); vl = QVBoxLayout(box); vl.setContentsMargins(0, 0, 0, 0)
+        self.levels = {}
+        for key, label in COMPRESS_CHOICES:
+            rb = QRadioButton(label); self.levels[key] = rb; vl.addWidget(rb)
+        self.levels.get(level, self.levels["high"]).setChecked(True)
+        self.add("정도", box)
+        self.meta = self.add("", QCheckBox("문서 정보·메타데이터 삭제")); self.meta.setChecked(remove_metadata)
 
     def values(self) -> dict:
-        return {"level": ["low", "medium", "high"][self.level.currentIndex()]}
+        return {"level": next(k for k, rb in self.levels.items() if rb.isChecked()), "remove_metadata": self.meta.isChecked()}
 
 
 class OcrDialog(FormDialog):
@@ -672,7 +682,7 @@ class BatchDialog(QDialog):
         self.fmt = QComboBox()
         for label, key in ConvertDialog.FORMATS: self.fmt.addItem(label, key)
         f.addRow("변환 형식", self.fmt)
-        self.level = QComboBox(); self.level.addItems(["낮음", "보통", "높음"]); self.level.setCurrentIndex(1); f.addRow("압축 정도", self.level)
+        self.level = QComboBox(); self.level.addItems([label for _, label in COMPRESS_CHOICES]); f.addRow("압축 정도", self.level)
         self.wm = QLineEdit("대외비"); f.addRow("워터마크 글자", self.wm)
         self.pw = QLineEdit(); self.pw.setEchoMode(QLineEdit.EchoMode.Password); f.addRow("열기 암호", self.pw)
         from PySide6.QtPrintSupport import QPrinterInfo
@@ -701,7 +711,7 @@ class BatchDialog(QDialog):
     def values(self) -> dict:
         k = self.op.currentData()
         target = {"docx": "word", "xlsx": "excel", "png": "images", "jpg": "images", "txt": "text"}.get(self.fmt.currentData(), self.fmt.currentData())
-        opts = {"convert": {"target": target, **({"fmt": "jpg"} if self.fmt.currentData() == "jpg" else {})}, "compress": {"level": ["low", "medium", "high"][self.level.currentIndex()]},
+        opts = {"convert": {"target": target, **({"fmt": "jpg"} if self.fmt.currentData() == "jpg" else {})}, "compress": {"level": COMPRESS_CHOICES[self.level.currentIndex()][0]},
                 "watermark": {"text": self.wm.text()}, "encrypt": {"user_pw": self.pw.text()}, "ocr": {}, "create": {},
                 "print": {"printer": self.printer.currentText()}}[k]
         return {"op": k, "inputs": self.files.paths(), "out_dir": self.out.text(), "options": opts}
@@ -838,7 +848,10 @@ class Worker(QThread):
             res = self.fn(*self.args, progress=self._prog, **self.kwargs) if "progress" in self.fn.__code__.co_varnames else self.fn(*self.args, **self.kwargs)
             self.finished_ok.emit(res)
         except Exception as e:  # noqa: BLE001
-            self.failed.emit(f"{e}\n\n{traceback.format_exc()[-800:]}")
+            if any(c.__name__ in ("EngineError", "DocumentError") for c in type(e).__mro__):
+                self.failed.emit(f"!{e}")  # 한국어로 쓴 안내(코드 흔적 없이 주의 창으로)
+            else:
+                self.failed.emit(f"{e}\n\n{traceback.format_exc()[-800:]}")
 
     def _prog(self, done: int, total: int, msg: str = ""):
         self.progress.emit(done, total, msg)
@@ -875,6 +888,9 @@ class ProgressDialog(QDialog):
         self.worker.start()
         self.exec()
         self.worker.wait(3000)
-        if self.error:
+        if self.error and self.error.startswith("!"):
+            self.error = self.error[1:]
+            QMessageBox.warning(self.parent(), self.windowTitle(), self.error)
+        elif self.error:
             QMessageBox.critical(self.parent(), self.windowTitle(), self.error.split("\n\n")[0])
         return self.result

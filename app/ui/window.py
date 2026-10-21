@@ -1276,21 +1276,22 @@ class MainWindow(QMainWindow):
 
     def compress(self, t: DocTab):
         size = os.path.getsize(t.doc.path) if t.doc.path and os.path.exists(t.doc.path) else len(t.doc.to_bytes())
-        dlg = D.CompressDialog(self, size)
+        dlg = D.CompressDialog(self, size, self.prefs.get("compress_level", "high"), self.prefs.get("compress_meta", True))
         if not dlg.exec():
             return
+        vals = dlg.values()
+        self.prefs["compress_level"] = vals["level"]; self.prefs["compress_meta"] = vals["remove_metadata"]; save_settings(self.settings)
         out, _ = QFileDialog.getSaveFileName(self, "압축한 PDF", self._suggest(t, "_압축.pdf"), PDF_FILTER)
         if not out:
             return
         T = _engine("tools")
         src = t.doc.copy()
-        res = D.ProgressDialog(self, "PDF 압축", T.compress, src, out, level=dlg.values()["level"], password=t.doc.password).run()
+        # 못 줄이면 엔진이 파일을 만들지 않고 NotSmaller 를 낸다(ProgressDialog 가 그 문구를 띄움)
+        res = D.ProgressDialog(self, "PDF 압축", T.compress, src, out, password=t.doc.password, before=size, **vals).run()
         src.close()
         if res:
-            if res["after"] >= size:
-                QMessageBox.information(self, "PDF 압축", f"더 줄일 수 없습니다 · 원본 {size / 1024:.0f} KB, 결과 {res['after'] / 1024:.0f} KB\n{out}")
-            else:
-                QMessageBox.information(self, "PDF 압축", f"{size / 1024:.0f} KB → {res['after'] / 1024:.0f} KB\n{out}")
+            QMessageBox.information(self, "PDF 압축", f"{size / 1024:.0f} KB → {res['after'] / 1024:.0f} KB "
+                                    f"({(1 - res['after'] / size) * 100:.0f}% 줄임)\n{out}")
             self.open_path(out)
 
     def flatten(self, t: DocTab):

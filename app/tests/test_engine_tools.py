@@ -165,9 +165,33 @@ def test_compress(doc, tmp_path):
     buf = io.BytesIO()
     im.save(buf, "PNG")
     doc[0].insert_image(fitz.Rect(72, 420, 400, 750), stream=buf.getvalue())
+    doc.set_metadata({"title": "제목", "author": "누구"})
     r = tools.compress(doc, str(tmp_path / "c.pdf"), level="high")
     assert r["before"] > 0 and r["after"] > 0 and r["after"] < r["before"]
-    assert fitz.open(str(tmp_path / "c.pdf")).page_count == 3
+    c = fitz.open(str(tmp_path / "c.pdf"))
+    assert c.page_count == 3 and not c.metadata["title"] and not c.metadata["author"]  # 메타데이터 삭제가 기본
+    w = c.extract_image(c[0].get_images()[0][0])["width"]
+    assert w <= 400  # 높음 = 72dpi 쪽으로(MuPDF 는 정수배로 솎아 1600 → 400)
+
+
+def test_compress_bitonal_and_not_smaller(tmp_path):
+    from PIL import Image
+    import io
+
+    d = fitz.open()
+    p = d.new_page()
+    im = Image.effect_noise((2400, 2400), 80).point(lambda v: 255 if v > 128 else 0).convert("1")  # 흑백 300dpi 넘는 스캔
+    buf = io.BytesIO(); im.save(buf, "PNG")
+    p.insert_image(fitz.Rect(0, 0, 400, 400), stream=buf.getvalue())
+    r = tools.compress(d, str(tmp_path / "b.pdf"), level="medium")
+    assert r["after"] < r["before"]
+    b = fitz.open(str(tmp_path / "b.pdf"))
+    assert b.extract_image(b[0].get_images()[0][0])["width"] < 2400  # 흑백 그림도 줄었다(전에는 bitonal=False 라 그대로)
+    # 이미 다 줄인 문서는 파일을 만들지 않고 알린다
+    small = str(tmp_path / "s.pdf")
+    with pytest.raises(tools.NotSmaller):
+        tools.compress(b, small, level="low", before=os.path.getsize(str(tmp_path / "b.pdf")))
+    assert not os.path.exists(small) and not os.path.exists(small + ".rpdf-tmp")
 
 
 def test_flatten(doc, tmp_path):
