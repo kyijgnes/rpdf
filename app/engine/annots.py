@@ -204,7 +204,7 @@ def update(doc: Document, page: int, xref: int, *, stroke: Color | None = None, 
            width: float | None = None, opacity: float | None = None, content: str | None = None,
            author: str | None = None, rect: fitz.Rect | None = None, fontsize: float | None = None,
            text_color: Color | None = None, border: Color | None = None,
-           dashes: Sequence[float] | None = None) -> int | None:
+           dashes: Sequence[float] | None = None, subject: str | None = None) -> int | None:
     """주석을 고친다. 꼭짓점 주석을 옮기면 새로 만들어지므로 (새) xref 를 돌려준다.
 
     글상자: stroke(또는 text_color)=글자색, border=테두리 색, fill=바탕색. dashes=() 는 실선."""
@@ -230,24 +230,28 @@ def update(doc: Document, page: int, xref: int, *, stroke: Color | None = None, 
             bc0 = _freetext_border(a)
             rich0 = _is_rich(f, a)
         if kind != "FreeText" and (stroke is not None or fill is not None):
-            a.set_colors(stroke=stroke, fill=fill)
+            a.set_colors(stroke=stroke, fill=[] if fill == () else fill)  # () = 채움 없애기(None 은 그대로 둠)
         if width is not None and kind not in ("Caret", "Text", "FileAttachment") + MARKUP_KINDS:
             a.set_border(width=width)
         if dashes is not None and kind not in ("FreeText", "Caret", "Text", "FileAttachment") + MARKUP_KINDS:
-            a.set_border(width=(a.border or {}).get("width", 1), dashes=list(dashes) or None)
+            w = (a.border or {}).get("width", 1)
+            a.set_border({"width": w, "dashes": list(dashes), "style": "D"} if dashes else {"width": w, "dashes": [], "style": "S"})
         if opacity is not None:
             a.set_opacity(opacity)
         if content is not None:
             a.set_info(content=content)
         if author is not None:
             a.set_info(title=author)
+        if subject is not None:
+            a.set_info(subject=subject)
         if kind == "FreeText":
             # 글상자는 set_colors 를 못 쓴다. 안 준 값은 지금 값을 그대로 쓴다(안 그러면 크기 12·검정으로 돌아감).
             tc = tuple(text_color or stroke or tc0)
-            bc = tuple(border) if border is not None else bc0
+            # 보통 글상자는 테두리가 글자색을 따라간다(글자색만 바꿨는데 리치로 바뀌어 옛 테두리 색이 남지 않게)
+            bc = tuple(border) if border is not None else bc0 if rich0 or bc0 is None else tc
             rich = rich0 or (bc is not None and bc != tc)
             text = content if content is not None else a.info.get("content", "")
-            _ft_redraw(f, a, text, fontsize or fs0, tc, fill, bc, rich)
+            _ft_redraw(f, a, text, fontsize or fs0, tc, None if fill == () else fill, bc, rich)
         else:
             a.update()
         return a.xref

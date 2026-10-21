@@ -135,6 +135,7 @@ class PageView(QGraphicsView):
     status = Signal(str)
     toolDone = Signal(str)  # 도구 하나 쓰고 나서(스탬프 등은 계속 쓰기)
     requestDialog = Signal(str, object)  # 화면에 대화상자를 부탁(종류, 자료)
+    toolChanged = Signal(str)  # 속성 패널이 그 도구의 기억해 둔 모양을 얹는다
 
     def __init__(self, doc: Document, parent=None):
         super().__init__(parent)
@@ -530,6 +531,7 @@ class PageView(QGraphicsView):
                 "pencil", "eraser", "note", "caret", "attach") else Qt.CursorShape.ArrowCursor
         self.viewport().setCursor(QCursor(cur))
         self.viewport().update()
+        self.toolChanged.emit(tool)
 
     def set_edit_mode(self, on: bool):
         self.edit_mode = on
@@ -961,7 +963,7 @@ class PageView(QGraphicsView):
                 A.line(d, i, s0, s1, P["stroke"], P["width"], arrow=(t == "arrow"), opacity=P["opacity"],
                        author=P["author"])
         elif t == "areahl":
-            A.area_highlight(d, i, pr, P["hl_color"], 0.4, P["author"])
+            A.area_highlight(d, i, pr, P["hl_color"], P["opacity"], P["author"])
         elif t == "redact":
             A.mark_redact(d, i, pr, P["redact_fill"])
         elif t == "textbox":
