@@ -438,9 +438,16 @@ class BookmarkPanel(QWidget):
         self.doc.set_bookmarks(self._collect())
         self.changed.emit()
 
-    def add(self):
-        pg = self.get_current_page()
-        title, ok = QInputDialog.getText(self, "북마크 추가", "이름", text=f"{pg + 1}쪽")
+    def rename_current(self):
+        it = self.tree.currentItem()
+        if it:
+            self.tree.editItem(it, 0)
+
+    def add(self, title: str = "", page: int | None = None):
+        """지금 쪽(또는 page)에 북마크. title 을 주면(고른 글자) 그것을 이름 칸에 미리 넣는다."""
+        pg = self.get_current_page() if page is None else page
+        title = title if isinstance(title, str) else ""   # 단추·메뉴 신호는 checked(bool) 를 넘긴다
+        title, ok = QInputDialog.getText(self, "북마크 추가", "이름", text=(title.strip()[:255] or f"{pg + 1}쪽"))
         if not ok or not title.strip():
             return
         it = QTreeWidgetItem([title.strip()])
@@ -606,7 +613,7 @@ class AttachmentPanel(QWidget):
 
 class SearchPanel(QWidget):
     hitsChanged = Signal(list, int)   # [(page, [rect…])], current
-    replaced = Signal()
+    replaced = Signal(object)         # 바꾼 쪽 목록(None 이면 여러 쪽)
 
     def __init__(self, doc: Document, parent=None):
         super().__init__(parent)
@@ -633,13 +640,18 @@ class SearchPanel(QWidget):
         opts.addWidget(self.case); opts.addWidget(self.whole); opts.addStretch(); opts.addWidget(self.count)
         lay.addLayout(opts)
         # 바꾸기
+        self.repl = QLineEdit(); self.repl.setPlaceholderText("바꿀 글자"); self.repl.returnPressed.connect(self.replace_one)
+        lay.addWidget(self.repl)
         rrow = QHBoxLayout()
-        self.repl = QLineEdit(); self.repl.setPlaceholderText("바꿀 글자")
-        rrow.addWidget(self.repl)
+        rb1 = QPushButton("바꾸기"); rb1.clicked.connect(self.replace_one); rrow.addWidget(rb1)
         rb = QPushButton("모두 바꾸기"); rb.clicked.connect(self.replace_all); rrow.addWidget(rb)
         lay.addLayout(rrow)
+        self._quiet = False   # 내가 바꾼 것이라 doc_changed 로 다시 찾지 않음
+        self.jump = True      # hitsChanged 를 받는 쪽이 지금 결과로 옮겨 갈지
         self.list = QListWidget(); self.list.itemClicked.connect(self._pick)
         self.list.setUniformItemSizes(True)  # 한 줄 글이라 칸 높이가 같다. 안 두면 결과 300건에 칸 재기만 0.24초
+        # 고른 줄로 저절로 굴리면 결과마다 목록 전체 칸을 다시 재어 0.13초(298건이면 1.3초) 멈췄다. 보이게 하는 것은 step 이 한 줄만
+        self.list.setAutoScroll(False)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list.setTextElideMode(Qt.TextElideMode.ElideRight)
         outer.addWidget(self.list)
@@ -647,49 +659,120 @@ class SearchPanel(QWidget):
     def focus(self):
         self.edit.setFocus(); self.edit.selectAll()
 
+    def focus_replace(self):
+        """검색 및 바꾸기(Ctrl+T): 찾을 글자가 있으면 바꿀 글자 칸으로."""
+        (self.repl if self.edit.text() else self.edit).setFocus()
+
     BG_PAGES = 60  # 이보다 큰 문서는 일꾼에서 찾는다(959쪽은 글자 뽑기만 0.9초)
 
     def run(self, sync: bool = False):
-        q = self.edit.text()
+        self._search(sync=sync)
+
+    def _args(self):
+        return self.edit.text(), self.case.isChecked(), self.whole.isChecked()
+
+    def _search(self, sync: bool = False, near: tuple | None = None, jump: bool = True):
+        """전부 다시 찾는다. near=(쪽, y, x) 를 주면 그 자리 다음 결과를 지금 결과로(문서가 바뀌어 다시 찾을 때 자리를 지킨다)."""
+        q, case, whole = self._args()
         self.list.clear()
         self.hits = []; self.results = []
         self._gen += 1
         if not q:
             self.count.setText(""); self.hitsChanged.emit([], -1); return
-        args = (q, self.case.isChecked(), self.whole.isChecked())
         if sync or self.doc.page_count <= self.BG_PAGES:
-            self._show(self.doc.search(args[0], case=args[1], whole_word=args[2]))
+            self._show(self.doc.search(q, case=case, whole_word=whole), near, jump)
             return
         self.count.setText("찾는 중")
-        w = _SearchWorker(self.doc, *args)
-        w.found.connect(lambda res, g=self._gen: self._show(res) if g == self._gen else None)
+        w = _SearchWorker(self.doc, q, case, whole)
+        w.found.connect(lambda res, g=self._gen: self._show(res, near, jump) if g == self._gen else None)
         w.finished.connect(lambda: self._workers.remove(w) if w in self._workers else None)
         self._workers.append(w)
         w.start()
 
-    def _show(self, res):
+    def _show(self, res, near: tuple | None = None, jump: bool = True):
+        """jump=False 면 강조만 고치고 보기는 그 자리에 둔다(문서를 고쳐 다시 찾았을 때)."""
+        self.jump = jump
         self.results = res
         self.hits = [(h.page, h.all_rects()) for h in res]
         self.list.setUpdatesEnabled(False)
+        self.list.clear()
         for h in res:
             self.list.addItem(f"{h.page + 1}쪽   {h.context[:60]}")
         self.list.setUpdatesEnabled(True)
-        self.current = 0 if self.hits else -1
-        self.count.setText(f"{len(self.hits)}개" if self.hits else "없음")
+        self.current = self._index_after(near) if near else (0 if self.hits else -1)
         if self.hits:
-            self.list.setCurrentRow(0)
+            self.list.setCurrentRow(self.current)
+            self.list.scrollToItem(self.list.item(self.current))
+        self._count()
         self.hitsChanged.emit(self.hits, self.current)
+
+    def _count(self):
+        """「3/12」: 지금 결과 / 모두. 없으면 「없음」."""
+        self.count.setText(f"{self.current + 1}/{len(self.hits)}" if self.hits else ("없음" if self.edit.text() else ""))
+
+    def _index_after(self, near: tuple) -> int:
+        """near=(쪽, y, x) 자리이거나 그 뒤에 오는 첫 결과(끝을 넘으면 처음)."""
+        if not self.results:
+            return -1
+        pg, y, x = near
+        for k, h in enumerate(self.results):
+            r = h.rect
+            if h.page > pg or (h.page == pg and (r.y0 > y + 2 or (abs(r.y0 - y) <= 2 and r.x0 >= x - 1))):
+                return k
+        return 0
 
     def step(self, d: int):
         if not self.hits:
             return
         self.current = (self.current + d) % len(self.hits)
         self.list.setCurrentRow(self.current)
+        self.list.scrollToItem(self.list.item(self.current))
+        self._count()
+        self.jump = True
         self.hitsChanged.emit(self.hits, self.current)
 
     def _pick(self, it):
         self.current = self.list.row(it)
+        self.jump = True
+        self._count()
         self.hitsChanged.emit(self.hits, self.current)
+
+    def _splice(self, pages: set[int], near: tuple | None = None, jump: bool = True):
+        """그 쪽만 다시 찾아 결과에 끼운다(한 쪽 4ms 안팎. 959쪽 전체를 다시 찾으면 1초)."""
+        q, case, whole = self._args()
+        cur = self.results[self.current] if 0 <= self.current < len(self.results) else None
+        new = self.doc.search(q, pages=sorted(pages), case=case, whole_word=whole) if q else []
+        res = sorted([h for h in self.results if h.page not in pages] + new, key=lambda h: h.page)   # 쪽 안 차례는 그대로
+        if near is None and cur is not None:
+            near = (cur.page, cur.rect.y0, cur.rect.x0)
+        self._show(res, near, jump)
+
+    def doc_changed(self, pages: list[int] | None, structural: bool = False):
+        """문서가 바뀌었다: 찾아 둔 결과의 자리가 틀릴 수 있어 다시 찾는다(바뀐 쪽만, 쪽 구조가 바뀌면 전부)."""
+        if self._quiet or not self.edit.text():
+            return
+        cur = self.results[self.current] if 0 <= self.current < len(self.results) else None
+        near = (cur.page, cur.rect.y0, cur.rect.x0) if cur else None
+        if structural or pages is None:
+            self._search(near=near, jump=False)
+        else:
+            self._splice(set(pages), near, jump=False)
+
+    def replace_one(self):
+        """지금 결과 하나를 바꾸고 다음 결과로(알PDF 「바꾸기」). 아직 안 찾았으면 이번에는 찾기만."""
+        if not self.hits:
+            self.run(); return
+        if not (0 <= self.current < len(self.results)):
+            return
+        h = self.results[self.current]
+        self.doc.replace_text([h], self.repl.text())
+        self._quiet = True
+        try:
+            self.replaced.emit([h.page])
+        finally:
+            self._quiet = False
+        # 바꾼 글자 뒤부터(바꾼 글자에 찾는 말이 또 들어 있어도 같은 자리를 다시 고르지 않게)
+        self._splice({h.page}, (h.page, h.rect.y0, h.rect.x1 - 1))
 
     def replace_all(self):
         if not self.hits:
@@ -698,7 +781,11 @@ class SearchPanel(QWidget):
             return
         n = self.doc.replace_text(self.results, self.repl.text())
         QMessageBox.information(self, "바꾸기", f"{n}곳을 바꿨습니다")
-        self.replaced.emit()
+        self._quiet = True
+        try:
+            self.replaced.emit(sorted({h.page for h in self.results}))
+        finally:
+            self._quiet = False
         self.run()
 
     def close(self):

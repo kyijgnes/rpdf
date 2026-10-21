@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import bisect
 import math
 import queue
 import threading
@@ -47,12 +48,16 @@ class RenderWorker(QThread):
         self._stop = False
         self.gen = 0
         self.annots = True  # 주석 보이기(보기 설정)
+        self.big_image: dict[int, bool] = {}   # 쪽마다: 100만 화소 넘는 그림이 있나(띠로 나누면 덜 멈추는 쪽). 문서가 바뀌면 비움
 
     def request(self, page: int, zoom: float):
         self.q.put((page, zoom, self.gen))
 
-    def invalidate(self):
+    def invalidate(self, content: bool = False):
+        """content=True: 문서 내용이 바뀌었다(쪽마다 알아 둔 것도 버린다)."""
         self.gen += 1
+        if content:
+            self.big_image = {}
         while not self.q.empty():
             try:
                 self.q.get_nowait()
@@ -64,7 +69,11 @@ class RenderWorker(QThread):
         self.q.put((-1, 0, 0))
         self.wait(2000)
 
+    BAND_MS = 16   # 한 쪽이 이보다 오래 걸릴 것 같으면 띠로 나눠 그린다(그동안 화면이 멈추지 않게)
+    BAND_EACH = 6  # 띠 하나에 들일 시간(ms)
+
     def run(self):
+        ms_per_mp = None   # 이 문서에서 100만 화소 그리는 데 든 시간(최근 쪽들 평균). 스캔본은 15~20, 글자 PDF 는 2~8
         while not self._stop:
             page, zoom, gen = self.q.get()
             if page < 0 or self._stop:
@@ -72,7 +81,26 @@ class RenderWorker(QThread):
             if gen != self.gen:
                 continue
             try:
-                pix = self.doc.render(page, zoom, annots=self.annots)
+                big_image = self.big_image
+                with self.doc.lock:
+                    pg = self.doc.fitz[page]
+                    r = pg.rect
+                    if page not in big_image:   # 쪽 자원의 그림 목록만 본다(0.1~1ms)
+                        big_image[page] = any(w * h > 1e6 for _, _, w, h, *_ in pg.get_images())
+                    del pg
+                mp = r.width * r.height * zoom * zoom / 1e6
+                est = (ms_per_mp or 0) * mp
+                t0 = time.perf_counter()
+                # 글자·선만 있는 쪽은 띠마다 다시 그려 오히려 느리다. 큰 그림이 든 쪽만(그림 풀기는 한 번이고 띠마다 제 몫만 그림)
+                if est > self.BAND_MS and big_image[page]:
+                    pix = self.doc.render_bands(page, zoom, math.ceil(est / self.BAND_EACH), annots=self.annots,
+                                                cancel=lambda g=gen: g != self.gen or self._stop)
+                    if pix is None:
+                        continue
+                else:
+                    pix = self.doc.render(page, zoom, annots=self.annots)
+                ms = (time.perf_counter() - t0) * 1000 / max(mp, 0.05)
+                ms_per_mp = ms if ms_per_mp is None else ms_per_mp * 0.6 + ms * 0.4
                 img = _qimage(pix)
             except Exception:  # noqa: BLE001
                 continue
@@ -189,6 +217,13 @@ class PageView(QGraphicsView):
         self._hover_block: fitz.Rect | None = None
         self.search_hits: list[tuple[int, list[fitz.Rect]]] = []  # (쪽, 줄마다 네모)
         self.search_current = -1
+        self._back: list[tuple[int, float, int]] = []   # 이전 보기 자리(view_pos)
+        self._fwd: list[tuple[int, float, int]] = []
+        self._space_tool = ""   # Space 를 누르는 동안 손 도구로 바꾸기 전의 도구
+        self._rects: list[fitz.Rect] = []   # 쪽 크기(rebuild 때 한 번 읽는다)
+        self._tops: list[float] = []        # 보이는 쪽의 위 끝(장면 y, 차례대로). 보이는 쪽 찾기용
+        self._shown: list[int] = []         # 그 쪽 번호
+        self._held: set[int] = set()        # 그림을 들고 있는 쪽
 
         self.worker = RenderWorker(doc)
         self.worker.annots = self.show_annots
@@ -218,6 +253,9 @@ class PageView(QGraphicsView):
         self.worker.stop()
 
     def page_rect_pt(self, i: int) -> fitz.Rect:
+        """쪽 크기(회전 반영). 확대할 때마다 쪽마다 fitz 에 물으면 959쪽 문서에서 한 번에 15ms 가 들어 rebuild 때 읽어 둔다."""
+        if i < len(self._rects):
+            return self._rects[i]
         return self.doc.fitz[i].rect
 
     def rebuild(self, mapping: list[int | None] | None = None, dirty=()):
@@ -229,13 +267,17 @@ class PageView(QGraphicsView):
         self.words_cache.clear(); self.blocks_cache.clear()
         self.rotation_cache.clear()
         n = self.doc.page_count
+        with self.doc.lock:
+            self._rects = [fitz.Rect(self.doc.fitz[i].rect) for i in range(n)]
+        self._held = set()
         for i in range(n):
             it = PageItem(self, i)
             if mapping is not None and i < len(mapping) and i not in dirty and mapping[i] in old:
                 it.pm, it.pm_zoom = old[mapping[i]]
+                self._held.add(i)
             self.scene_.addItem(it)
             self.items.append(it)
-        self.worker.invalidate()
+        self.worker.invalidate(content=True)
         self._pending.clear()  # 버린 부탁이 남아 있으면 그 쪽을 다시 부탁하지 못해 흰 쪽으로 남는다
         self.relayout()
         self.current = min(self.current, n - 1)
@@ -254,8 +296,9 @@ class PageView(QGraphicsView):
         y = MARGIN
         maxw = 0
         pages = self.visible_pages_for_layout()
+        on = set(pages)   # 목록에 「in」 을 쓰면 959쪽에서 쪽 수의 제곱만큼 돈다
         for it in self.items:
-            it.setVisible(it.index in pages)
+            it.setVisible(it.index in on)
         facing = self.layout_mode.startswith("facing")
         if not facing:
             for i in pages:
@@ -284,9 +327,9 @@ class PageView(QGraphicsView):
                 maxw = max(maxw, x - GAP + MARGIN)
                 y += rh + GAP
             self.scene_.setSceneRect(0, 0, maxw, y + MARGIN)
-        for it in self.items:
-            if it.pm is not None and it.pm_zoom != z:
-                pass  # 옛 그림을 늘려 보여 주다가 새 그림이 오면 바꾼다
+        # 보이는 쪽 찾기용: 위 끝이 차례대로 늘어나는 목록(두 쪽 보기는 한 줄 두 쪽이 같은 값). 옛 그림은 늘려 보여 주다가 새 그림이 오면 바꾼다
+        self._shown = list(pages)
+        self._tops = [self.items[i].pos().y() for i in pages]
         self.viewport().update()
         QTimer.singleShot(0, self._request_visible)
 
@@ -313,13 +356,16 @@ class PageView(QGraphicsView):
         self.centerOn(new_pt + (QPointF(self.viewport().width() / 2, self.viewport().height() / 2) - vp))
         self.zoomChanged.emit(z)
 
+    # 확대·축소 단추가 건너는 배율(알PDF 단계표에서 10~800% 만). Ctrl+휠은 1.1배씩 부드럽게
+    STEPS = (0.10, 0.15, 0.25, 1 / 3, 0.50, 0.75, 1.00, 1.25, 1.50, 2.00, 3.00, 4.00, 6.00, 8.00)
+
     def zoom_in(self):
         self.zoom_mode = "fixed"
-        self.set_zoom(self.zoom * 1.2)
+        self.set_zoom(next((s for s in self.STEPS if s > self.zoom * 1.001), self.STEPS[-1]))
 
     def zoom_out(self):
         self.zoom_mode = "fixed"
-        self.set_zoom(self.zoom / 1.2)
+        self.set_zoom(next((s for s in reversed(self.STEPS) if s < self.zoom * 0.999), self.STEPS[0]))
 
     def set_zoom_mode(self, mode: str):
         self.zoom_mode = mode
@@ -375,8 +421,10 @@ class PageView(QGraphicsView):
             return
         lo, hi = vis[0], vis[-1]
         held = []
-        for it in self.items:
-            if it.pm is None:
+        for i in list(self._held):   # 그림을 든 쪽만 본다(모든 쪽을 훑지 않게)
+            it = self.items[i] if i < len(self.items) else None
+            if it is None or it.pm is None:
+                self._held.discard(i)
                 continue
             d = lo - it.index if it.index < lo else it.index - hi if it.index > hi else 0
             if d > self.KEEP_NEAR:
@@ -397,6 +445,7 @@ class PageView(QGraphicsView):
         it = self.items[page]
         it.pm = QPixmap.fromImage(img)
         it.pm_zoom = zoom
+        self._held.add(page)
         it.update()
 
     def refresh_pages(self, pages: list[int] | None = None, structural: bool = False,
@@ -406,7 +455,7 @@ class PageView(QGraphicsView):
         if structural:
             self.rebuild(mapping, set(pages or ()))
         else:
-            self.worker.invalidate()
+            self.worker.invalidate(content=True)
             self._pending.clear()
             for it in self.items:
                 if pages is None or it.index in pages:
@@ -415,12 +464,22 @@ class PageView(QGraphicsView):
         self.docChanged.emit()
         QTimer.singleShot(0, self._request_visible)
 
+    def _candidates(self, vr: QRectF) -> list[int]:
+        """화면 높이 vr 에 걸칠 수 있는 쪽만(위 끝 목록을 반으로 나눠 찾는다). 스크롤할 때마다 모든 쪽을 훑으면 959쪽에서 몇 ms 씩 들었다."""
+        if len(self._tops) != len(self._shown):
+            return [it.index for it in self.items if it.isVisible()]
+        # 쪽은 위아래로 겹치지 않으니 화면 위 끝보다 위에서 시작한 쪽은 마지막 줄(두 쪽 보기면 둘)만 걸칠 수 있다
+        lo = max(0, bisect.bisect_right(self._tops, vr.top()) - 2)
+        hi = bisect.bisect_right(self._tops, vr.bottom())
+        return self._shown[lo:hi]
+
     def visible_pages(self) -> list[int]:
         vr = self.mapToScene(self.viewport().rect()).boundingRect()
         out = []
-        for it in self.items:
+        for i in self._candidates(vr):
+            it = self.items[i]
             if it.isVisible() and it.sceneBoundingRect().intersects(vr):
-                out.append(it.index)
+                out.append(i)
         return out
 
     def scrollContentsBy(self, dx, dy):
@@ -432,7 +491,8 @@ class PageView(QGraphicsView):
         vr = self.mapToScene(self.viewport().rect()).boundingRect()
         best, best_area = self.current, -1.0
         mid = vr.center().y()
-        for it in self.items:
+        for i in self._candidates(vr):
+            it = self.items[i]
             if not it.isVisible():
                 continue
             r = it.mapRectToScene(it.page_rect())
@@ -448,10 +508,16 @@ class PageView(QGraphicsView):
             self.pageChanged.emit(best)
 
     # ── 이동 ──────────────────────────────────────────────────
-    def goto(self, i: int, y_pt: float | None = None):
+    HISTORY = 50  # 이전 보기로 돌아갈 수 있는 자리 수
+
+    def goto(self, i: int, y_pt: float | None = None, remember: bool = True):
+        """i 쪽으로(y_pt 를 주면 그 높이가 위에서 조금 아래에 오게). 다른 쪽으로 건너뛰면 떠나는 자리를 「이전 보기」 에 남긴다."""
         if self.closed:
             return
         i = max(0, min(i, self.doc.page_count - 1))
+        if remember and i != self.current and self.items:
+            self._push_history(self._back)
+            self._fwd.clear()
         if self.layout_mode in ("single", "facing") and i not in self.visible_pages_for_layout():
             self.current = i
             self.relayout()
@@ -467,15 +533,54 @@ class PageView(QGraphicsView):
 
     def next_page(self):
         step = 2 if self.layout_mode.startswith("facing") else 1
-        self.goto(self.current + step)
+        self.goto(self.current + step, remember=False)
 
     def prev_page(self):
         step = 2 if self.layout_mode.startswith("facing") else 1
-        self.goto(self.current - step)
+        self.goto(self.current - step, remember=False)
+
+    def view_pos(self) -> tuple[int, float, int]:
+        """지금 보는 자리: (쪽, 화면 맨 위가 그 쪽 위에서 몇 pt 아래인가, 가로 스크롤 값)."""
+        if not self.items:
+            return 0, 0.0, 0
+        i = max(0, min(self.current, len(self.items) - 1))
+        y = (self.verticalScrollBar().value() - self.items[i].pos().y()) / (self.zoom or 1)
+        return i, round(y, 1), self.horizontalScrollBar().value()
+
+    def set_view_pos(self, i: int, y_pt: float, x: int = 0):
+        """view_pos 로 잰 자리로 그대로 돌아간다(이전 보기·다시 열 때)."""
+        if self.closed or not self.items:
+            return
+        i = max(0, min(int(i), len(self.items) - 1))
+        if self.layout_mode in ("single", "facing") and i not in self.visible_pages_for_layout():
+            self.current = i
+            self.relayout()
+        self.verticalScrollBar().setValue(int(self.items[i].pos().y() + y_pt * self.zoom))
+        self.horizontalScrollBar().setValue(int(x))
+        if self.current != i:
+            self.current = i
+            self.pageChanged.emit(i)
+        QTimer.singleShot(0, self._request_visible)
+
+    def _push_history(self, stack: list):
+        stack.append(self.view_pos())
+        del stack[:-self.HISTORY]
+
+    def back(self):
+        """이전 보기(Alt+←): 건너뛰기 전에 보던 자리로."""
+        if self._back:
+            self._push_history(self._fwd)
+            self.set_view_pos(*self._back.pop())
+
+    def forward(self):
+        if self._fwd:
+            self._push_history(self._back)
+            self.set_view_pos(*self._fwd.pop())
 
     # ── 좌표 ──────────────────────────────────────────────────
     def page_at(self, scene_pt: QPointF) -> int:
-        for it in self.items:
+        for i in self._candidates(QRectF(scene_pt.x(), scene_pt.y(), 1, 1)):
+            it = self.items[i]
             if it.isVisible() and it.mapRectToScene(it.page_rect()).contains(scene_pt):
                 return it.index
         return -1
@@ -524,12 +629,17 @@ class PageView(QGraphicsView):
         self._poly.clear()
         self._ink.clear()
         self._drag_rect = None
+        self._space_tool = ""
+        self._apply_cursor()
+        self.viewport().update()
+
+    def _apply_cursor(self):
+        tool = self.tool
         cur = {"hand": Qt.CursorShape.OpenHandCursor, "select": Qt.CursorShape.IBeamCursor}.get(tool)
         if cur is None:
             cur = Qt.CursorShape.CrossCursor if tool in TOOLS_SHAPE or tool in TOOLS_MARKUP or tool in (
                 "pencil", "eraser", "note", "caret", "attach") else Qt.CursorShape.ArrowCursor
         self.viewport().setCursor(QCursor(cur))
-        self.viewport().update()
 
     def set_edit_mode(self, on: bool):
         self.edit_mode = on
@@ -781,13 +891,26 @@ class PageView(QGraphicsView):
             self._finish_poly(); return
         if k == Qt.Key.Key_Delete and self.sel:
             self.delete_selection(); return
+        if k == Qt.Key.Key_Space and not e.isAutoRepeat() and self.tool != "hand" and not self._space_tool:
+            # 누르는 동안만 손 도구(알PDF 와 같음). 떼면 하던 도구로
+            self._space_tool = self.tool
+            self.viewport().setCursor(Qt.CursorShape.OpenHandCursor); self.tool = "hand"
+            return
+        if k == Qt.Key.Key_Space:
+            return
+        ctrl = bool(e.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         if k in (Qt.Key.Key_Home,):
             self.goto(0); return
         if k in (Qt.Key.Key_End,):
             self.goto(self.doc.page_count - 1); return
-        if k == Qt.Key.Key_PageDown or (k == Qt.Key.Key_Right and self.layout_mode in ("single", "facing")):
+        # 다음 쪽: PageDown · Ctrl+↓ · Enter (한 쪽·두 쪽 보기는 → 도), 이전 쪽: PageUp · Ctrl+↑ · Shift+Enter (←)
+        enter = k in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+        if (k == Qt.Key.Key_PageDown or (ctrl and k == Qt.Key.Key_Down) or (enter and not shift)
+                or (k == Qt.Key.Key_Right and self.layout_mode in ("single", "facing"))):
             self.next_page(); return
-        if k == Qt.Key.Key_PageUp or (k == Qt.Key.Key_Left and self.layout_mode in ("single", "facing")):
+        if (k == Qt.Key.Key_PageUp or (ctrl and k == Qt.Key.Key_Up) or (enter and shift)
+                or (k == Qt.Key.Key_Left and self.layout_mode in ("single", "facing"))):
             self.prev_page(); return
         if e.matches(e.StandardKey.Copy):
             self.copy_selection(); return
@@ -801,6 +924,14 @@ class PageView(QGraphicsView):
                 self._select_words(i, r, click=False, scene_pt=None)
             return
         super().keyPressEvent(e)
+
+    def keyReleaseEvent(self, e: QKeyEvent):
+        if e.key() == Qt.Key.Key_Space and not e.isAutoRepeat() and self._space_tool:
+            tool, self._space_tool = self._space_tool, ""
+            self._panning = False
+            self.tool = tool; self._apply_cursor()   # set_tool 은 그리던 다각형을 지운다
+            return
+        super().keyReleaseEvent(e)
 
     # ── 고르기 ────────────────────────────────────────────────
     def _try_select_annot(self, i: int, sp: QPointF, e: QMouseEvent) -> bool:
@@ -1047,11 +1178,18 @@ class PageView(QGraphicsView):
     # ── 오른쪽 클릭 ───────────────────────────────────────────
     def _context_menu(self, e: QMouseEvent, i: int, sp: QPointF):
         m = QMenu(self)
+        act = lambda key: self.requestDialog.emit("action", key)  # noqa: E731  창의 동작(on_action)을 부탁
         if self.sel and self.sel.kind == "words":
+            s = self.sel
             m.addAction("복사", self.copy_selection)
+            m.addSeparator()
             m.addAction("강조", lambda: self._markup_sel("Highlight"))
             m.addAction("밑줄", lambda: self._markup_sel("Underline"))
             m.addAction("취소선", lambda: self._markup_sel("StrikeOut"))
+            m.addAction("구불구불한 선", lambda: self._markup_sel("Squiggly"))
+            m.addSeparator()
+            m.addAction("북마크 추가", lambda: self.requestDialog.emit("bookmark_text", {"page": s.page, "text": s.text}))
+            m.addAction("이 글자 검색", lambda: self.requestDialog.emit("search_text", " ".join(s.text.split())[:200]))
             m.addSeparator()
             m.addAction("교정 표시", lambda: self._redact_sel())
         elif self.sel and self.sel.kind in ("annot", "widget"):
@@ -1066,11 +1204,25 @@ class PageView(QGraphicsView):
             m.addAction("삭제", self.delete_selection)
         else:
             m.addAction("모두 선택", lambda: self.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)))
-            m.addAction("이 쪽에 메모", lambda: self.requestDialog.emit("note", {"page": i, "point": self.to_page(i, sp)}))
+            if i >= 0:
+                m.addAction("이 쪽에 메모", lambda: self.requestDialog.emit("note", {"page": i, "point": self.to_page(i, sp)}))
+                m.addAction("북마크 추가", lambda: self.requestDialog.emit("bookmark_text", {"page": i, "text": ""}))
             m.addSeparator()
-            m.addAction("왼쪽 회전", lambda: self.requestDialog.emit("rotate", {"pages": [i], "deg": -90}))
-            m.addAction("오른쪽 회전", lambda: self.requestDialog.emit("rotate", {"pages": [i], "deg": 90}))
-            m.addAction("이 쪽 삭제", lambda: self.requestDialog.emit("delete_pages", {"pages": [i]}))
+            m.addAction("확대", lambda: act("zoomin")); m.addAction("축소", lambda: act("zoomout"))
+            m.addSeparator()
+            m.addAction("첫 페이지", lambda: act("first")).setEnabled(self.current > 0)
+            m.addAction("마지막 페이지", lambda: act("last")).setEnabled(self.current < self.doc.page_count - 1)
+            m.addAction("이전 보기", self.back).setEnabled(bool(self._back))
+            m.addAction("다음 보기", self.forward).setEnabled(bool(self._fwd))
+            if i >= 0:
+                m.addSeparator()
+                m.addAction("왼쪽 회전", lambda: self.requestDialog.emit("rotate", {"pages": [i], "deg": -90}))
+                m.addAction("오른쪽 회전", lambda: self.requestDialog.emit("rotate", {"pages": [i], "deg": 90}))
+                m.addAction("이 쪽 삭제", lambda: self.requestDialog.emit("delete_pages", {"pages": [i]}))
+            m.addSeparator()
+            m.addAction("인쇄", lambda: act("print")); m.addAction("문서 속성", lambda: act("properties"))
+            if self.window().isFullScreen():
+                m.addAction("전체 화면 끝내기", lambda: act("fullscreen"))
         m.exec(e.globalPosition().toPoint())
 
     def _markup_sel(self, kind: str):
