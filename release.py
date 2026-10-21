@@ -47,7 +47,9 @@ SRC = os.path.join(WORK, "src")
 APPINFO = os.path.join("app", "appinfo.py")
 VERSION_RE = re.compile(r'^(VERSION\s*=\s*")([^"]*)(")', re.M)
 LOCK_NAME = "_PDF앱 빌드중.md"
-COUNTS = os.path.join(os.path.expanduser("~"), ".rpdf_downloads.json")   # 집 폴더라 저장소에 안 섞인다
+# 저장소 바로 바깥(14. 도구\)이라 공개 저장소에 안 섞인다. csv 는 잴 때마다 한 줄씩 쌓는 누적 기록(사람이 보는 것)
+COUNTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "RPDF 다운로드 기록.json")
+COUNTS_CSV = os.path.join(os.path.dirname(COUNTS), "RPDF 다운로드 기록.csv")
 
 
 def die(msg: str):
@@ -135,6 +137,13 @@ def record_counts() -> list[dict]:
     data["updated"] = f"{datetime.datetime.now():%Y-%m-%d %H:%M}"
     with open(COUNTS, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    new = not os.path.exists(COUNTS_CSV)
+    with open(COUNTS_CSV, "a", encoding="utf-8") as f:
+        if new:
+            f.write("잰 시각,버전,setup 받은 수,latest.json 읽은 수,비고\n")
+        for r in rels:
+            exe = sum(n for k, n in r["assets"].items() if k.endswith(".exe"))
+            f.write(f"{data['updated']},{r['tag']},{exe},{r['assets'].get('latest.json', 0)},\n")
     step(f"내려받은 횟수(setup 기준, {COUNTS})")
     total = 0
     for tag in sorted(data["releases"], key=parse_version):
