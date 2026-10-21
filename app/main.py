@@ -41,6 +41,10 @@ def main(argv: list[str] | None = None) -> int:
         if single.send([p for p in argv if os.path.exists(p)]):
             return 0
         first = single.claim_first()   # 받는 창이 그사이 닫혔으면 이쪽이 첫 창이 된다
+    from .ui import gate
+    if (not alone or updater.installed()) and not gate.startup_gate():   # 배포자가 사용을 멈췄거나 7일 넘게 확인을 못 했으면 열지 않는다(app/policy.py)
+        single.release()
+        return 0
     from .ui.window import MainWindow
     w = MainWindow()
     if first and not alone:
@@ -55,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
     from .ui.update import after_update as reopen
     reopen(w, after_update)
     QTimer.singleShot(3000, w.updates.auto_check)   # 새 버전이 있으면 상태줄에 단추(설치본만)
+    w._policy = gate.PolicyWatch(w)   # 켜 둔 동안 정책을 다시 본다(설치본만)
+    w._policy.start()
     # 개발 확인용: PDFAPP_SHOT=그림경로[;탭키[;side|props|organize]] 이면 3초 뒤 창을 찍고 끝낸다
     shot = os.environ.get("PDFAPP_SHOT")
     if shot:
