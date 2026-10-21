@@ -407,6 +407,43 @@ class Document:
             mat = fitz.Matrix(zoom, zoom)
             return page.get_pixmap(matrix=mat, clip=clip, annots=annots, alpha=alpha)
 
+    def render_bands(self, i: int, zoom: float, bands: int, annots: bool = True,
+                     cancel: Callable[[], bool] | None = None) -> fitz.Pixmap | None:
+        """쪽을 가로 띠 bands 개로 나눠 그려 한 장으로 붙인다. 띠 사이마다 잠금과 GIL 을 놓아
+        다른 스레드(화면)가 끼어들 수 있게 한다. PyMuPDF 는 그리는 동안 GIL 을 놓지 않아, 스캔본 한 쪽(33ms)을
+        통째로 그리면 그동안 화면이 멈췄다(띠 넷이면 가장 긴 멈춤 41 → 7ms, 10-21 측정). cancel() 이 참이면 그만두고 None.
+        띠 경계의 그림 화소가 1~6 단계 다를 수 있다(눈으로는 안 보임). 글자 쪽은 띠마다 다시 그려 느려지므로 무거운 쪽에만 쓴다."""
+        mat = fitz.Matrix(zoom, zoom)
+        with self.lock:
+            f0 = self.fitz
+            page = f0[i]
+            full = (page.rect * mat).irect
+            dl = page.get_displaylist(annots=annots)   # 쪽 내용 해석은 한 번만
+        out = fitz.Pixmap(fitz.csRGB, full, False)
+        h = full.height
+        n = max(1, min(int(bands), h))
+        cuts = [full.y0 + k * h // n for k in range(n + 1)]
+        k = 0
+        first = None
+        while k < n:
+            time.sleep(0.0005)
+            if cancel is not None and cancel():
+                return None
+            y0, y1 = cuts[k], cuts[k + 1]
+            t = time.perf_counter()
+            with self.lock:
+                if self.fitz is not f0:   # 띠 사이에 되돌리기·저장이 문서를 바꿔 끼웠다(옛 문서는 닫혔다)
+                    return None
+                bp = dl.get_pixmap(matrix=mat, clip=fitz.Rect(full.x0, y0, full.x1, y1) * ~mat, alpha=False)
+            out.copy(bp, bp.irect)
+            took = time.perf_counter() - t
+            k += 1
+            # 둘째 띠도 첫 띠만큼 오래 걸리면(띠마다 쪽을 거의 통째로 다시 그리는 쪽) 나눠 봐야 느려지기만 한다. 남은 것을 한 번에
+            if k == 2 and first is not None and took > first * 0.7 and n > 3:
+                cuts = cuts[:3] + [cuts[-1]]; n = 3
+            first = took if first is None else first
+        return out
+
     def render_png(self, i: int, zoom: float = 1.0) -> bytes:
         return self.render(i, zoom).tobytes("png")
 

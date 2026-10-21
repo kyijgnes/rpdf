@@ -48,12 +48,16 @@ class RenderWorker(QThread):
         self._stop = False
         self.gen = 0
         self.annots = True  # 주석 보이기(보기 설정)
+        self.big_image: dict[int, bool] = {}   # 쪽마다: 100만 화소 넘는 그림이 있나(띠로 나누면 덜 멈추는 쪽). 문서가 바뀌면 비움
 
     def request(self, page: int, zoom: float):
         self.q.put((page, zoom, self.gen))
 
-    def invalidate(self):
+    def invalidate(self, content: bool = False):
+        """content=True: 문서 내용이 바뀌었다(쪽마다 알아 둔 것도 버린다)."""
         self.gen += 1
+        if content:
+            self.big_image = {}
         while not self.q.empty():
             try:
                 self.q.get_nowait()
@@ -65,7 +69,11 @@ class RenderWorker(QThread):
         self.q.put((-1, 0, 0))
         self.wait(2000)
 
+    BAND_MS = 16   # 한 쪽이 이보다 오래 걸릴 것 같으면 띠로 나눠 그린다(그동안 화면이 멈추지 않게)
+    BAND_EACH = 6  # 띠 하나에 들일 시간(ms)
+
     def run(self):
+        ms_per_mp = None   # 이 문서에서 100만 화소 그리는 데 든 시간(최근 쪽들 평균). 스캔본은 15~20, 글자 PDF 는 2~8
         while not self._stop:
             page, zoom, gen = self.q.get()
             if page < 0 or self._stop:
@@ -73,7 +81,26 @@ class RenderWorker(QThread):
             if gen != self.gen:
                 continue
             try:
-                pix = self.doc.render(page, zoom, annots=self.annots)
+                big_image = self.big_image
+                with self.doc.lock:
+                    pg = self.doc.fitz[page]
+                    r = pg.rect
+                    if page not in big_image:   # 쪽 자원의 그림 목록만 본다(0.1~1ms)
+                        big_image[page] = any(w * h > 1e6 for _, _, w, h, *_ in pg.get_images())
+                    del pg
+                mp = r.width * r.height * zoom * zoom / 1e6
+                est = (ms_per_mp or 0) * mp
+                t0 = time.perf_counter()
+                # 글자·선만 있는 쪽은 띠마다 다시 그려 오히려 느리다. 큰 그림이 든 쪽만(그림 풀기는 한 번이고 띠마다 제 몫만 그림)
+                if est > self.BAND_MS and big_image[page]:
+                    pix = self.doc.render_bands(page, zoom, math.ceil(est / self.BAND_EACH), annots=self.annots,
+                                                cancel=lambda g=gen: g != self.gen or self._stop)
+                    if pix is None:
+                        continue
+                else:
+                    pix = self.doc.render(page, zoom, annots=self.annots)
+                ms = (time.perf_counter() - t0) * 1000 / max(mp, 0.05)
+                ms_per_mp = ms if ms_per_mp is None else ms_per_mp * 0.6 + ms * 0.4
                 img = _qimage(pix)
             except Exception:  # noqa: BLE001
                 continue
@@ -250,7 +277,7 @@ class PageView(QGraphicsView):
                 self._held.add(i)
             self.scene_.addItem(it)
             self.items.append(it)
-        self.worker.invalidate()
+        self.worker.invalidate(content=True)
         self._pending.clear()  # 버린 부탁이 남아 있으면 그 쪽을 다시 부탁하지 못해 흰 쪽으로 남는다
         self.relayout()
         self.current = min(self.current, n - 1)
@@ -428,7 +455,7 @@ class PageView(QGraphicsView):
         if structural:
             self.rebuild(mapping, set(pages or ()))
         else:
-            self.worker.invalidate()
+            self.worker.invalidate(content=True)
             self._pending.clear()
             for it in self.items:
                 if pages is None or it.index in pages:
