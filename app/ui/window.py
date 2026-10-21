@@ -39,6 +39,9 @@ from ..appinfo import APP_ID, APP_NAME, ICON, OLD_APP_IDS  # noqa: E402
 
 SETTINGS = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_ID, "settings.json")
 PDF_FILTER = "PDF 파일 (*.pdf);;모든 파일 (*)"
+# 리본 단추 앞머리 → 꾸미기 종류(「watermark_update」 는 워터마크 업데이트)
+DECO_KEYS = {"watermark": "watermark", "background": "background", "headerfooter": "header_footer",
+             "pagenumber": "page_number", "bates": "bates"}
 OPEN_FILTER = "PDF·이미지·문서 (*.pdf *.png *.jpg *.jpeg *.bmp *.tif *.tiff *.gif *.webp *.xps *.epub *.txt *.svg *.cbz);;PDF 파일 (*.pdf);;모든 파일 (*)"
 
 
@@ -872,17 +875,15 @@ class MainWindow(QMainWindow):
                 if v.sel and v.sel.kind == "image": self.on_request(t, "replace_image", v.sel)
                 else: self.say("편집 모드에서 이미지를 먼저 고르세요")
             # 편집 꾸미기
-            elif key == "watermark": self.run_tool(t, "watermark", D.WatermarkDialog(self, d.page_count, v.current, v.props))
-            elif key == "background": self.run_tool(t, "background", D.BackgroundDialog(self, d.page_count, v.current))
-            elif key == "headerfooter": self.run_tool(t, "header_footer", D.HeaderFooterDialog(self, d.page_count, v.current))
-            elif key == "bates": self.run_tool(t, "bates_numbers", D.BatesDialog(self, d.page_count, v.current))
+            elif key.split("_")[0] in DECO_KEYS:   # 워터마크·배경·머리글·쪽 번호·베이츠의 추가·업데이트·삭제
+                self.decorate(t, DECO_KEYS[key.split("_")[0]], key.partition("_")[2] or "add")
             elif key == "pagelabel":
                 dlg = D.PageLabelDialog(self, d.page_count, v.current)
                 if dlg.exec(): P.set_labels(d, **dlg.values()); t.changed(None, structural=True)
             # 구성
             elif key in ("thumb_in", "thumb_out"): t.organize.set_width(t.organize.thumb_w + (30 if key == "thumb_in" else -30))
             elif key in ("rotate_left", "rotate_right", "delete_pages", "extract", "insert_blank", "insert_pdf", "insert_images", "crop_pages",
-                         "resize", "replace", "duplicate", "pagebox", "delete_blank", "reverse", "rotate_pages", "split"):
+                         "resize", "replace", "duplicate", "pagebox", "delete_blank", "reverse", "rotate_pages", "split", "split_page"):
                 pages = t.organize.selected_pages() if t.view_stack.currentWidget() is t.organize else []
                 if not pages and t.side.isVisible() and t.side_key == "thumbs":
                     pages = t.thumbs.selected_pages()
@@ -907,12 +908,20 @@ class MainWindow(QMainWindow):
                 n = A.recognize_fields(d); t.changed(None); self.say(f"양식 칸 {n}개를 만들었습니다")
             elif key == "form_export": self.form_data(t, "export")
             elif key == "form_import": self.form_data(t, "import")
-            elif key == "form_reset": A.reset_fields(d); t.changed(None)
+            elif key == "form_reset": d.snapshot(); _engine("tools").reset_form(d.fitz); t.changed(None)   # 칸마다 기본값으로
+            elif key == "form_set_default":
+                d.snapshot(); n = _engine("tools").set_form_defaults(d.fitz); t.changed(None); self.say(f"{n}칸의 지금 값을 기본값으로 정했습니다")
             elif key == "form_preview": v.set_form_mode(False); self.ribbon.set_toggle("form_edit", False); self.say("미리보기: 칸을 두 번 눌러 값을 넣습니다")
             elif key.startswith("align_"):
-                items = [(v.sel.page, v.sel.xref)] if v.sel and v.sel.kind == "widget" else []
-                if len(items) < 1: self.say("맞출 양식 칸을 먼저 고르세요"); return
-                A.align_fields(d, items, key[6:]); t.changed([v.sel.page])
+                # 뷰어는 칸을 하나만 고르므로, 그 쪽의 칸을 창에서 여럿 골라 맞춘다
+                pg = v.sel.page if v.sel and v.sel.kind == "widget" else v.current
+                ws = [(w.xref, w.field_name, w.field_type_string) for w in d.fitz[pg].widgets()]
+                if not ws: self.say("이 쪽에는 양식 칸이 없습니다"); return
+                dlg = D.FieldAlignDialog(self, pg, ws, {v.sel.xref} if v.sel and v.sel.kind == "widget" else set(), key[6:])
+                if not dlg.exec(): return
+                vals = dlg.values()
+                if not vals["xrefs"]: self.say("맞출 칸을 고르세요"); return
+                d.snapshot(); _engine("tools").align_widgets(d.fitz, [(pg, x) for x in vals["xrefs"]], vals["how"]); t.changed([pg])
             # 보안
             elif key == "encrypt": self.encrypt(t)
             elif key == "decrypt": self.decrypt(t)
@@ -1011,6 +1020,11 @@ class MainWindow(QMainWindow):
                 t.changed(None, structural=True); self.say(f"빈 쪽 {len(gone)}장을 지웠습니다")
             elif key == "reverse":
                 rev = list(range(d.page_count - 1, -1, -1)); P.reorder(d, rev); t.changed(None, structural=True, mapping=rev)
+            elif key == "split_page":
+                dlg = D.SplitGridDialog(self, d.page_count, cur, pages)
+                if dlg.exec():
+                    vals = dlg.values(); m = P.split_grid(d, vals["pages"], vals["cols"], vals["rows"])
+                    t.changed(None, structural=True, mapping=m); self.say(f"쪽 {len(vals['pages'])}장을 나눠 모두 {d.page_count}쪽이 됐습니다")
             elif key == "split":
                 dlg = D.SplitDialog(self, d.page_count, os.path.dirname(d.path) if d.path else os.path.expanduser("~"))
                 if dlg.exec():
@@ -1327,6 +1341,70 @@ class MainWindow(QMainWindow):
             if vals["open_after"]:
                 self._offer_open(path if isinstance(res, str) else out)
 
+    def _deco_dialog(self, t: DocTab, kind: str, update: bool):
+        n, cur = t.doc.page_count, t.viewer.current
+        return {"watermark": lambda: D.WatermarkDialog(self, n, cur, t.viewer.props, update=update),
+                "background": lambda: D.BackgroundDialog(self, n, cur, update=update),
+                "header_footer": lambda: D.HeaderFooterDialog(self, n, cur, update=update),
+                "page_number": lambda: D.PageNumberDialog(self, n, cur, update=update),
+                "bates": lambda: D.BatesDialog(self, n, cur, update=update)}[kind]()
+
+    def decorate(self, t: DocTab, kind: str, how: str):
+        """꾸미기 추가(add)·업데이트(update)·삭제(remove). 넣은 것은 문서 안에 표시가 남아 다시 찾는다."""
+        T = _engine("tools")
+        d = t.doc
+        name = T.DECO_KINDS[kind]
+        groups = T.decorations(d.fitz, kind)
+        if how == "remove":
+            if not groups:
+                self.say(f"이 문서에는 {name}이(가) 없습니다"); return
+            if QMessageBox.question(self, f"{name} 삭제", f"이 문서의 {name}을(를) 모두 지울까요?") != QMessageBox.StandardButton.Yes:
+                return
+            d.snapshot(); T.remove_decorations(d.fitz, kind); t.changed(None); return
+        pick = None
+        if how == "add" and groups:
+            box = QMessageBox(QMessageBox.Icon.Question, name, f"이 문서에 {name}이(가) 이미 있습니다.", parent=self)
+            more = box.addButton("하나 더 넣기", QMessageBox.ButtonRole.AcceptRole)
+            edit = box.addButton("있는 것 고치기", QMessageBox.ButtonRole.ActionRole)
+            box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            if box.clickedButton() is edit: how = "update"
+            elif box.clickedButton() is not more: return
+        if how == "update":
+            if not groups:
+                self.say(f"이 문서에는 {name}이(가) 없습니다"); return
+            pick = 0
+            if len(groups) > 1:
+                items = [f"{k + 1}. {self._deco_desc(g)}" for k, g in enumerate(groups)]
+                it, ok = QInputDialog.getItem(self, f"{name} 업데이트", "고칠 것", items, 0, False)
+                if not ok: return
+                pick = items.index(it)
+        dlg = self._deco_dialog(t, kind, pick is not None)
+        if pick is not None:
+            dlg.load(groups[pick]["settings"], groups[pick]["pages"])
+        if not dlg.exec():
+            return
+        vals = dlg.values()
+        pages = vals.pop("pages")
+        d.snapshot()
+        if pick is None:
+            T.add_decoration(d.fitz, kind, pages=pages, file_name=os.path.splitext(d.name)[0] if kind == "header_footer" else None, **vals)
+        else:
+            if kind == "header_footer":
+                vals["file_name"] = groups[pick]["settings"].get("file_name")
+            groups[pick] = {"settings": vals, "pages": pages}
+            T.replace_decorations(d.fitz, kind, groups)
+        t.changed(None)
+
+    @staticmethod
+    def _deco_desc(g: dict) -> str:
+        s = g["settings"]
+        what = (s.get("text") or os.path.basename(s.get("image_path") or "") or s.get("style")
+                or next((s.get(k) for k in ("left", "center", "right", "footer_left", "footer_center", "footer_right") if s.get(k)), "")
+                or (f"{s.get('prefix', '')}{int(s.get('start', 1)):0{int(s.get('digits', 1))}d}" if "digits" in s else "")
+                or ("색" if s.get("color") else ""))
+        return f"{P.format_range(g['pages'])}쪽 · {what}"
+
     def run_tool(self, t: DocTab, fn_name: str, dlg):
         """워터마크·배경·머리글·베이츠처럼 문서를 바로 고치는 도구."""
         if not dlg.exec():
@@ -1401,21 +1479,22 @@ class MainWindow(QMainWindow):
 
     def compress(self, t: DocTab):
         size = os.path.getsize(t.doc.path) if t.doc.path and os.path.exists(t.doc.path) else len(t.doc.to_bytes())
-        dlg = D.CompressDialog(self, size)
+        dlg = D.CompressDialog(self, size, self.prefs.get("compress_level", "high"), self.prefs.get("compress_meta", True))
         if not dlg.exec():
             return
+        vals = dlg.values()
+        self.prefs["compress_level"] = vals["level"]; self.prefs["compress_meta"] = vals["remove_metadata"]; save_settings(self.settings)
         out, _ = QFileDialog.getSaveFileName(self, "압축한 PDF", self._suggest(t, "_압축.pdf"), PDF_FILTER)
         if not out:
             return
         T = _engine("tools")
         src = t.doc.copy()
-        res = D.ProgressDialog(self, "PDF 압축", T.compress, src, out, level=dlg.values()["level"], password=t.doc.password).run()
+        # 못 줄이면 엔진이 파일을 만들지 않고 NotSmaller 를 낸다(ProgressDialog 가 그 문구를 띄움)
+        res = D.ProgressDialog(self, "PDF 압축", T.compress, src, out, password=t.doc.password, before=size, **vals).run()
         src.close()
         if res:
-            if res["after"] >= size:
-                QMessageBox.information(self, "PDF 압축", f"더 줄일 수 없습니다 · 원본 {size / 1024:.0f} KB, 결과 {res['after'] / 1024:.0f} KB\n{out}")
-            else:
-                QMessageBox.information(self, "PDF 압축", f"{size / 1024:.0f} KB → {res['after'] / 1024:.0f} KB\n{out}")
+            QMessageBox.information(self, "PDF 압축", f"{size / 1024:.0f} KB → {res['after'] / 1024:.0f} KB "
+                                    f"({(1 - res['after'] / size) * 100:.0f}% 줄임)\n{out}")
             self.open_path(out)
 
     def flatten(self, t: DocTab):
@@ -1462,10 +1541,15 @@ class MainWindow(QMainWindow):
     def form_data(self, t: DocTab, how: str):
         T = _engine("tools")
         if how == "export":
-            out, _ = QFileDialog.getSaveFileName(self, "양식 데이터 내보내기", self._suggest(t, "_양식.json"), "JSON (*.json);;CSV (*.csv)")
-            if out: T.export_form_data(t.doc.fitz, out); self._offer_open(out)
+            # FDF·XFDF 는 알PDF·아크로뱃과 주고받는 표준 꼴(기본), JSON·CSV 는 엑셀 등으로 볼 때
+            out, sel = QFileDialog.getSaveFileName(self, "양식 데이터 내보내기", self._suggest(t, ".fdf"),
+                                                   "FDF (*.fdf);;XFDF (*.xfdf);;JSON (*.json);;CSV (*.csv)")
+            if out:
+                ext = {"FDF": ".fdf", "XFDF": ".xfdf", "JSON": ".json", "CSV": ".csv"}.get(sel.split(" ")[0], "")
+                if ext and not out.lower().endswith(ext): out = os.path.splitext(out)[0] + ext
+                T.export_form_data(t.doc.fitz, out, pdf_name=t.doc.name); self.say(f"양식 데이터를 저장했습니다: {out}")
         else:
-            p, _ = QFileDialog.getOpenFileName(self, "양식 데이터 가져오기", "", "JSON (*.json)")
+            p, _ = QFileDialog.getOpenFileName(self, "양식 데이터 가져오기", "", "양식 데이터 (*.fdf *.xfdf *.json *.csv)")
             if p:
                 t.doc.snapshot(); n = T.import_form_data(t.doc.fitz, p); t.changed(None); self.say(f"{n}칸을 채웠습니다")
 
@@ -1488,18 +1572,19 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "일괄 작업", msg); self._offer_open(job["out_dir"])
 
     def encrypt(self, t: DocTab):
-        dlg = D.EncryptDialog(self)
+        T = _engine("tools")
+        dlg = D.EncryptDialog(self, T.encryption_method(t.doc.fitz))
         if not dlg.exec():
             return
         vals = dlg.values()
-        if vals is None:
+        if not dlg.to_new_file():
+            # 알PDF 처럼 열린 문서에 걸어 두고 다음 저장 때 파일에 건다(Document.save 가 security 를 본다)
+            t.doc.security = vals; t.doc.modified = True; t.changed(None)
+            self.say(f"저장하면 암호가 걸립니다 · {dict(D.EncryptDialog.METHODS)[vals['method']].split(' · ')[0]}")
             return
-        if not vals["user_pw"] and not vals["owner_pw"]:
-            QMessageBox.warning(self, "암호화", "암호를 넣어 주세요"); return
         out, _ = QFileDialog.getSaveFileName(self, "암호 건 PDF 저장", self._suggest(t, "_암호.pdf"), PDF_FILTER)
         if not out:
             return
-        T = _engine("tools")
         T.encrypt(t.doc.fitz, out, **vals)
         self.say(f"암호를 걸어 저장했습니다: {out}")
 
@@ -1507,6 +1592,15 @@ class MainWindow(QMainWindow):
         # 권한 암호만 걸린 문서는 is_encrypted 가 False 다. 암호화 정보로 본다.
         if not (t.doc.fitz.metadata or {}).get("encryption") and not t.doc.password:
             self.say("이 문서에는 암호가 없습니다"); return
+        box = QMessageBox(QMessageBox.Icon.Question, "암호 풀기", "이 문서의 암호를 뺍니다.", parent=self)
+        here = box.addButton("이 문서에서 빼기 · 저장할 때 적용", QMessageBox.ButtonRole.AcceptRole)
+        new = box.addButton("암호 뺀 사본을 새 파일로", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is here:
+            t.doc.security = {}; t.doc.modified = True; t.changed(None); self.say("저장하면 암호가 빠집니다"); return
+        if box.clickedButton() is not new:
+            return
         out, _ = QFileDialog.getSaveFileName(self, "암호 푼 PDF 저장", self._suggest(t, "_암호해제.pdf"), PDF_FILTER)
         if out:
             c = t.doc.copy()  # 열린 문서를 encryption 없이 저장하면 그 뒤 저장이 깨진다. 사본에서 푼다

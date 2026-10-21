@@ -165,9 +165,33 @@ def test_compress(doc, tmp_path):
     buf = io.BytesIO()
     im.save(buf, "PNG")
     doc[0].insert_image(fitz.Rect(72, 420, 400, 750), stream=buf.getvalue())
+    doc.set_metadata({"title": "제목", "author": "누구"})
     r = tools.compress(doc, str(tmp_path / "c.pdf"), level="high")
     assert r["before"] > 0 and r["after"] > 0 and r["after"] < r["before"]
-    assert fitz.open(str(tmp_path / "c.pdf")).page_count == 3
+    c = fitz.open(str(tmp_path / "c.pdf"))
+    assert c.page_count == 3 and not c.metadata["title"] and not c.metadata["author"]  # 메타데이터 삭제가 기본
+    w = c.extract_image(c[0].get_images()[0][0])["width"]
+    assert w <= 400  # 높음 = 72dpi 쪽으로(MuPDF 는 정수배로 솎아 1600 → 400)
+
+
+def test_compress_bitonal_and_not_smaller(tmp_path):
+    from PIL import Image
+    import io
+
+    d = fitz.open()
+    p = d.new_page()
+    im = Image.effect_noise((2400, 2400), 80).point(lambda v: 255 if v > 128 else 0).convert("1")  # 흑백 300dpi 넘는 스캔
+    buf = io.BytesIO(); im.save(buf, "PNG")
+    p.insert_image(fitz.Rect(0, 0, 400, 400), stream=buf.getvalue())
+    r = tools.compress(d, str(tmp_path / "b.pdf"), level="medium")
+    assert r["after"] < r["before"]
+    b = fitz.open(str(tmp_path / "b.pdf"))
+    assert b.extract_image(b[0].get_images()[0][0])["width"] < 2400  # 흑백 그림도 줄었다(전에는 bitonal=False 라 그대로)
+    # 이미 다 줄인 문서는 파일을 만들지 않고 알린다
+    small = str(tmp_path / "s.pdf")
+    with pytest.raises(tools.NotSmaller):
+        tools.compress(b, small, level="low", before=os.path.getsize(str(tmp_path / "b.pdf")))
+    assert not os.path.exists(small) and not os.path.exists(small + ".rpdf-tmp")
 
 
 def test_flatten(doc, tmp_path):
@@ -415,6 +439,103 @@ def test_radio_group_export_import(tmp_path):
     assert [w.field_name for w in d.fitz[0].widgets()] == ["라디오 버튼", "라디오 버튼", "다른 묶음"]
 
 
+def _form_doc():
+    from app.engine import annots as A
+    d = _app_doc()
+    xs = {"text": A.add_field(d, 0, fitz.Rect(50, 300, 200, 320), "text", value="")}
+    xs["check"] = A.add_field(d, 0, fitz.Rect(50, 340, 64, 354), "checkbox")
+    xs["radios"] = [A.add_field(d, 0, fitz.Rect(50, 400 + 30 * k, 64, 414 + 30 * k), "radio") for k in range(3)]
+    return d, xs
+
+
+def _vals(d):
+    return {w.field_name + ("" if w.field_type != fitz.PDF_WIDGET_TYPE_RADIOBUTTON else f"#{w.on_state()}"): w.field_value
+            for w in d.fitz[0].widgets()}
+
+
+@pytest.mark.parametrize("ext", [".fdf", ".xfdf"])
+def test_form_fdf_xfdf_roundtrip(tmp_path, ext):
+    from app.engine import annots as A
+    d, xs = _form_doc()
+    A.set_field_value(d, 0, xs["text"], "한글 값 (괄호) \\ 끝")
+    A.set_field_value(d, 0, xs["check"], True)
+    A.set_field_value(d, 0, xs["radios"][2], True)
+    want = _vals(d)
+    out = str(tmp_path / ("f" + ext))
+    tools.export_form_data(d.fitz, out)
+    tools.reset_form(d.fitz)
+    assert _vals(d) != want
+    assert tools.import_form_data(d.fitz, out) == 3
+    assert _vals(d) == want
+
+
+def test_fdf_reads_indirect_and_kids():
+    raw = (b"%FDF-1.2\n1 0 obj <</FDF <</Fields [2 0 R <</T (a) /Kids [<</T (b) /V <FEFFD55C>>>]>>]>>>> endobj\n"
+           b"2 0 obj <</T (x\\(1\\)) /V /On>> endobj\ntrailer <</Root 1 0 R>>")
+    assert tools._read_fdf(raw) == {"x(1)": "On", "a.b": "한"}
+
+
+def test_form_reset_to_defaults():
+    from app.engine import annots as A
+    d, xs = _form_doc()
+    A.set_field_value(d, 0, xs["text"], "기본")
+    A.set_field_value(d, 0, xs["radios"][1], True)
+    assert tools.set_form_defaults(d.fitz) == 3
+    A.set_field_value(d, 0, xs["text"], "바꾼 값")
+    A.set_field_value(d, 0, xs["check"], True)
+    A.set_field_value(d, 0, xs["radios"][2], True)
+    tools.reset_form(d.fitz)
+    ws = list(d.fitz[0].widgets())
+    assert ws[0].field_value == "기본" and ws[1].field_value in ("Off", False, "")
+    assert [w.field_value for w in ws[2:]] == ["Off", "Choice2", "Off"]
+
+
+def test_align_widgets_union_and_distribute():
+    from app.engine import annots as A
+    d = _app_doc()
+    rs = [fitz.Rect(50, 300, 150, 320), fitz.Rect(120, 360, 260, 380), fitz.Rect(400, 420, 460, 440)]
+    xs = [A.add_field(d, 0, r, "text") for r in rs]
+    items = [(0, x) for x in xs]
+    tools.align_widgets(d.fitz, items, "hcenter")
+    cs = [(w.rect.x0 + w.rect.x1) / 2 for w in d.fitz[0].widgets()]
+    assert cs == pytest.approx([255] * 3)   # 합친 사각형(50~460)의 가운데
+    tools.align_widgets(d.fitz, items, "left")
+    assert [w.rect.x0 for w in d.fitz[0].widgets()] == pytest.approx([185] * 3)  # 가운데 맞춘 뒤 합친 사각형 왼쪽
+    tools.align_widgets(d.fitz, items, "dist_v")
+    ys = sorted((w.rect.y0, w.rect.y1) for w in d.fitz[0].widgets())
+    assert ys[1][0] - ys[0][1] == pytest.approx(ys[2][0] - ys[1][1]) and ys[0][0] == pytest.approx(300) and ys[2][1] == pytest.approx(440)
+    with pytest.raises(EngineError):
+        tools.align_widgets(d.fitz, items[:2], "dist_h")
+
+
+def test_split_grid_two_up_and_rotated():
+    from app.engine import pages as P
+    d = _app_doc(["둘째 쪽 second"])
+    p = d.fitz.new_page(0, width=842, height=595)   # 가로로 넓은 두 쪽 펼침
+    tw = fitz.TextWriter(p.rect)
+    tw.append((72, 300), "왼쪽 LEFT", font=tools.korean_font(), fontsize=14)
+    tw.append((500, 300), "오른쪽 RIGHT", font=tools.korean_font(), fontsize=14)
+    tw.write_text(p)
+    del p
+    d.fitz[1].set_rotation(90)
+    m = P.split_grid(d, [0, 1], cols=2, rows=1)
+    f = d.fitz
+    assert f.page_count == 4 and m == [0, 0, 1, 1]
+    assert f[0].rect.width == pytest.approx(421) and "LEFT" in f[0].get_text() and "RIGHT" not in f[0].get_text()
+    assert "RIGHT" in f[1].get_text() and "LEFT" not in f[1].get_text()
+    # 돌린 쪽도 보이는 화면 기준으로 왼쪽·오른쪽 반
+    assert f[2].rect.width == pytest.approx(421) and f[2].rect.height == pytest.approx(595)
+    assert "second" in f[2].get_text() + f[3].get_text()
+    with pytest.raises(ValueError):
+        P.split_grid(d, [0], 1, 1)
+
+
+def test_page_subset_and_format_range():
+    from app.engine import pages as P
+    assert P.subset(range(6), "odd") == [0, 2, 4] and P.subset(P.parse_range("1-6", 6), "even") == [1, 3, 5]
+    assert P.format_range([0, 2, 3, 4, 7]) == "1,3-5,8"
+
+
 def test_resize_keeps_annots_links_fields():
     from app.engine import annots as A
     from app.engine import pages as P
@@ -511,10 +632,76 @@ def test_encrypted_doc_survives_exports(tmp_path):
         assert g.needs_pass and g.authenticate(pw) and "Hello" in g[0].get_text()
 
 
+@pytest.mark.parametrize("method,word", [("aes128", "AES"), ("aes256", "AES"), ("rc4", "RC4")])
+def test_encrypt_methods(doc, tmp_path, method, word):
+    out = tools.encrypt(doc, str(tmp_path / "e.pdf"), user_pw="u", owner_pw="o", method=method, allow_copy=False)
+    e = fitz.open(out)
+    assert e.needs_pass and e.authenticate("u")
+    assert word in e.metadata["encryption"] and tools.encryption_method(e) == method
+    assert not e.permissions & fitz.PDF_PERM_COPY
+    with pytest.raises(EngineError):
+        tools.encrypt(doc, str(tmp_path / "x.pdf"), user_pw="같음", owner_pw="같음")
+
+
+def test_encrypt_current_doc_applies_on_save(tmp_path):
+    """지금 문서에 건 암호는 열린 문서를 그대로 고칠 수 있고, 저장할 때 파일에 걸린다."""
+    from app.engine import annots as A
+    from app.engine.document import Document
+    src = str(tmp_path / "plain.pdf"); make_doc().save(src)
+    d = Document(src)
+    with pytest.raises(EngineError):   # 128 bit 방식에 한글 암호: 말없이 암호 없는 파일이 되던 것을 막는다
+        tools.encrypt_bytes(d.fitz, user_pw="열기", owner_pw="o", method="aes128")
+    d.security = {"user_pw": "열기", "owner_pw": "권한", "method": "aes256"}
+    A.add_field(d, 0, fitz.Rect(50, 500, 200, 520), "text", value="암호 건 뒤 넣은 칸")
+    assert not fitz.open("pdf", open(src, "rb").read()).needs_pass            # 아직 파일은 그대로
+    d.save(src)
+    g = fitz.open("pdf", open(src, "rb").read())
+    assert g.needs_pass and g.authenticate("열기") and tools.encryption_method(g) == "aes256"
+    assert [w.field_value for w in g[0].widgets()] == ["암호 건 뒤 넣은 칸"] and "Hello" in g[0].get_text()
+    # 저장 뒤에도 계속 고치고 다시 저장할 수 있다(같은 암호 유지)
+    A.add_field(d, 0, fitz.Rect(50, 540, 200, 560), "text", value="둘째")
+    d.save(src)
+    g = fitz.open("pdf", open(src, "rb").read())
+    assert g.authenticate("권한") and [w.field_value for w in g[0].widgets()] == ["암호 건 뒤 넣은 칸", "둘째"]
+    d.security = {}   # 암호 빼기도 저장 때
+    d.save(src)
+    assert not fitz.open("pdf", open(src, "rb").read()).needs_pass
+
+
 def test_compare_aligns_inserted_page():
     a = make_doc(["A 하나 one", "B 둘 two", "C 셋 three"])
     b = make_doc(["A 하나 one", "새 쪽 new page", "B 둘 two", "C 셋 three"])
     assert tools.match_pages(a, b) == [(0, 0), (None, 1), (1, 2), (2, 3)]
+
+
+def test_decorations_add_find_update_remove(doc, tmp_path):
+    doc[1].set_rotation(90)
+    tools.add_decoration(doc, "page_number", style="{page} / {total}", start=3)
+    tools.add_decoration(doc, "watermark", text="대외비")
+    tools.add_decoration(doc, "bates", prefix="A-", start=1, digits=4, reverse=True, pages=[0, 2])
+    assert "3 / 5" in doc[0].get_text() and "5 / 5" in doc[2].get_text()   # n = 쪽 수 + 첫 번호 - 1
+    assert "A-0002" in doc[0].get_text() and "A-0001" in doc[2].get_text()   # 거꾸로
+    # 돌린 쪽에서도 바닥글은 보이는 쪽 아래쪽에 선다
+    r = doc[1].search_for("4 / 5")[0] * doc[1].rotation_matrix  # search_for 는 회전 전 좌표
+    assert r.y0 > doc[1].rect.height * 0.8 and abs((r.x0 + r.x1) / 2 - doc[1].rect.width / 2) < 20
+    p = str(tmp_path / "d.pdf"); doc.save(p)
+    d = fitz.open(p)
+    got = {g["kind"]: g for g in tools.decorations(d)}
+    assert set(got) == {"page_number", "watermark", "bates"} and got["bates"]["pages"] == [0, 2]
+    assert got["page_number"]["settings"]["start"] == 3
+    g = got["page_number"]; g["settings"]["style"] = "- {page} -"
+    tools.replace_decorations(d, "page_number", [g])
+    assert "- 3 -" in d[0].get_text() and "3 / 5" not in d[0].get_text()
+    assert tools.remove_decorations(d, "watermark") == 3
+    assert "대외비" not in d[0].get_text() and "Hello" in d[0].get_text() and "A-0002" in d[0].get_text()
+    assert {g["kind"] for g in tools.decorations(d)} == {"bates", "page_number"}
+
+
+def test_background_under_body(doc):
+    tools.add_decoration(doc, "background", color=(0, 0, 1), pages=[0])
+    pix = doc[0].get_pixmap(dpi=20)
+    assert pix.pixel(5, 5) == (0, 0, 255)
+    assert "Hello" in doc[0].get_text()  # 본문은 그대로 위에
 
 
 def test_watermark_tile(doc):

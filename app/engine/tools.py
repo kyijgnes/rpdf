@@ -143,15 +143,26 @@ def _write_text(page: fitz.Page, point, text: str, fontsize: float, color, opaci
 
 
 def _text_width(text: str, fontsize: float) -> float:
-    return korean_font().text_length(text, fontsize=fontsize)
+    # 맑은 고딕을 부를 때마다 파일에서 읽으면 쪽 번호 300쪽에 몇 초가 걸린다. 한 번 읽어 둔다
+    f = _FONT_CACHE.get("font")
+    if f is None:
+        f = _FONT_CACHE["font"] = korean_font()
+    return f.text_length(text, fontsize=fontsize)
 
 
 # ── 압축 ────────────────────────────────────────────────────────────────
+# 알PDF 단계값(높음 72dpi·45 / 중간 120dpi·70 / 낮음 150dpi·85). 목표 해상도보다 10% 넘게 고운 그림만 줄인다
+# (조금 넘는 것까지 다시 줄이면 화질만 깎인다. 문턱을 1/4 위로 두었더니 흔한 150dpi 스캔이 중간에서 안 줄었다)
 _LEVELS = {
-    "low": dict(dpi_threshold=300, dpi_target=200, quality=85),
-    "medium": dict(dpi_threshold=200, dpi_target=150, quality=75),
-    "high": dict(dpi_threshold=150, dpi_target=100, quality=60),
+    "high": dict(dpi_threshold=80, dpi_target=72, quality=45),
+    "medium": dict(dpi_threshold=132, dpi_target=120, quality=70),
+    "low": dict(dpi_threshold=165, dpi_target=150, quality=85),
 }
+COMPRESS_LEVELS = ("high", "medium", "low")   # 화면 차례(기본은 첫째 「높음」)
+
+
+class NotSmaller(EngineError):
+    """압축해도 원본보다 작아지지 않았다(결과 파일은 만들지 않음)."""
 
 
 def _keep_copy(doc: fitz.Document, password: str | None = None) -> fitz.Document:
@@ -164,35 +175,74 @@ def _keep_copy(doc: fitz.Document, password: str | None = None) -> fitz.Document
         raise EngineError(str(e)) from e
 
 
-def compress(doc: fitz.Document, out_path: str, level: str = "medium",
-             progress: Progress = None, password: str | None = None) -> dict:
-    """그림을 다시 눌러 담고 쓰레기 객체를 걷어 저장. {"before": 바이트, "after": 바이트}. 암호는 그대로."""
+def compress(doc: fitz.Document, out_path: str, level: str = "high",
+             progress: Progress = None, password: str | None = None, remove_metadata: bool = True,
+             before: int | None = None) -> dict:
+    """그림을 다시 눌러 담고 쓰레기 객체를 걷어 저장. {"before": 바이트, "after": 바이트}. 암호는 그대로.
+
+    흑백(1비트) 그림도 같은 해상도로 줄인다. 원본보다 작아지지 않으면 out_path 를 만들지 않고 NotSmaller.
+    before: 원본 파일 크기(사본을 넘길 때. 없으면 doc.name 파일이나 지금 바이트 길이로 잰다)."""
     if level not in _LEVELS:
         raise EngineError(f"압축 단계가 잘못됐습니다: {level}")
     opt = _LEVELS[level]
     work = _keep_copy(doc, password)
     # 다시 쓴 바이트 길이가 아니라 실제 파일 크기와 대조한다(원본보다 커진 것도 줄었다고 보였다)
     # 사본을 encryption 없이 tobytes 하면 사본의 암호가 떨어져 KEEP 저장이 깨진다(길이만 잴 때도 KEEP)
-    before = os.path.getsize(doc.name) if doc.name and os.path.exists(doc.name) else len(doc.tobytes(encryption=fitz.PDF_ENCRYPT_KEEP))
+    if before is None:
+        before = os.path.getsize(doc.name) if doc.name and os.path.exists(doc.name) else len(doc.tobytes(encryption=fitz.PDF_ENCRYPT_KEEP))
+    tmp = out_path + ".rpdf-tmp"
     try:
         _say(progress, 0, 2, "그림 다시 담는 중")
         if hasattr(work, "rewrite_images"):
             try:
-                work.rewrite_images(dpi_threshold=opt["dpi_threshold"], dpi_target=opt["dpi_target"],
-                                    quality=opt["quality"], lossy=True, lossless=True, bitonal=False)
+                work.rewrite_images(options=_rewrite_options(opt))
             except Exception:
                 _manual_recompress(work, opt, progress)
         else:
             _manual_recompress(work, opt, progress)
+        if remove_metadata:
+            work.set_metadata({})
+            try:
+                work.del_xml_metadata()
+            except Exception:  # noqa: BLE001
+                pass
         _say(progress, 1, 2, "저장하는 중")
         _subset(work)
-        work.save(out_path, garbage=4, deflate=True, clean=True, deflate_images=True, deflate_fonts=True,
+        work.save(tmp, garbage=4, deflate=True, clean=True, deflate_images=True, deflate_fonts=True,
                   encryption=fitz.PDF_ENCRYPT_KEEP)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
     finally:
         work.close()
-    after = os.path.getsize(out_path)
+    after = os.path.getsize(tmp)
+    if after >= before:  # 커진 파일을 「압축」 이라고 남기지 않는다
+        os.remove(tmp)
+        raise NotSmaller(f"더 줄일 수 없는 PDF 입니다(원본 {before / 1024:.0f} KB, 압축해 보니 {after / 1024:.0f} KB)")
+    os.replace(tmp, out_path)
     _say(progress, 2, 2, "압축 끝")
     return {"before": before, "after": after}
+
+
+def _rewrite_options(opt: dict):
+    """rewrite_images 기본(평균 솎기)은 정수배로만 줄여 212dpi 스캔이 120dpi 로 안 줄었다(중간·낮음이 같은 크기).
+    컬러·회색은 bicubic 으로 목표 해상도에 맞춰 줄인다. 흑백(1비트)은 팩스 압축이라 평균 솎기 그대로."""
+    m = fitz.mupdf
+    o = m.PdfImageRewriterOptions()
+    q = str(opt["quality"])
+    for kind in ("color_lossless", "color_lossy", "gray_lossless", "gray_lossy"):
+        setattr(o, f"{kind}_image_recompress_method", m.FZ_RECOMPRESS_JPEG)
+        setattr(o, f"{kind}_image_subsample_method", m.FZ_SUBSAMPLE_BICUBIC)
+        setattr(o, f"{kind}_image_subsample_threshold", opt["dpi_threshold"])
+        setattr(o, f"{kind}_image_subsample_to", opt["dpi_target"])
+        setattr(o, f"{kind}_image_recompress_quality", q)
+    o.bitonal_image_recompress_method = m.FZ_RECOMPRESS_FAX
+    o.bitonal_image_subsample_method = m.FZ_SUBSAMPLE_AVERAGE
+    o.bitonal_image_subsample_threshold = opt["dpi_threshold"]
+    o.bitonal_image_subsample_to = opt["dpi_target"]
+    o.bitonal_image_recompress_quality = q
+    return o
 
 
 def _manual_recompress(work: fitz.Document, opt: dict, progress: Progress) -> None:
@@ -388,13 +438,17 @@ def _fill_placeholders(s: str, page_no: int, total: int, date_s: str, fname: str
 def header_footer(doc: fitz.Document, left: str = "", center: str = "", right: str = "",
                   footer_left: str = "", footer_center: str = "", footer_right: str = "",
                   font_size: float = 10, margin_mm: float = 12, pages=None, start_number: int = 1,
-                  date_format: str = "%Y-%m-%d", color=(0, 0, 0), file_name: str | None = None) -> None:
-    """머리글·바닥글 여섯 자리. 자리표: {page} {total} {date} {file}. in place."""
+                  date_format: str = "%Y-%m-%d", color=(0, 0, 0), file_name: str | None = None,
+                  total: int | None = None) -> None:
+    """머리글·바닥글 여섯 자리. 자리표: {page} {total} {date} {file}. in place.
+
+    {total} 은 (적용할 쪽 수 + 첫 번호 - 1), 곧 마지막 쪽에 찍히는 번호다(알PDF 의 n). total 로 따로 줄 수 있다."""
     col = _color(color) or (0, 0, 0)
     date_s = _dt.datetime.now().strftime(date_format)
     fname = file_name if file_name is not None else _file_stem(doc)
     targets = _pages(doc, pages)
-    total = len(targets)
+    if total is None:
+        total = len(targets) + start_number - 1
     m = margin_mm * MM
     for k, pno in enumerate(targets):
         page = doc[pno]
@@ -416,21 +470,179 @@ def header_footer(doc: fitz.Document, left: str = "", center: str = "", right: s
 
 def bates_numbers(doc: fitz.Document, prefix: str = "", start: int = 1, digits: int = 6,
                   suffix: str = "", position: str = "footer_right", font_size: float = 10,
-                  pages=None, color=(0, 0, 0)) -> None:
-    """베이츠 번호(접두어 + 0 채운 번호 + 접미어). position: header_/footer_ + left/center/right. in place."""
+                  pages=None, color=(0, 0, 0), reverse: bool = False, margin_mm: float = 12) -> None:
+    """베이츠 번호(접두어 + 0 채운 번호 + 접미어). position: header_/footer_ + left/center/right. in place.
+
+    reverse: 마지막 쪽이 start 이고 앞으로 갈수록 커진다(알PDF 「베이츠 번호 거꾸로」)."""
     col = _color(color) or (0, 0, 0)
     pos = position.lower()
     vy, _, hx = pos.partition("_")
     hx = hx or "right"
-    m = 12 * MM
-    for k, pno in enumerate(_pages(doc, pages)):
+    m = margin_mm * MM
+    targets = _pages(doc, pages)
+    for k, pno in enumerate(targets):
         page = doc[pno]
         rect = page.rect
-        s = f"{prefix}{start + k:0{digits}d}{suffix}"
+        no = start + (len(targets) - 1 - k if reverse else k)
+        s = f"{prefix}{no:0{digits}d}{suffix}"
         w = _text_width(s, font_size)
         x = {"left": rect.x0 + m, "center": rect.x0 + (rect.width - w) / 2, "right": rect.x1 - m - w}.get(hx, rect.x1 - m - w)
         y = rect.y0 + m + font_size * 0.8 if vy == "header" else rect.y1 - m
         _write_text(page, (x, y), s, font_size, col)
+
+
+# 쪽 번호 모양(화면 이름, 머리글 자리표). 쪽 번호는 머리글/바닥글 한 칸에 번호만 든 것이다(알PDF 와 같은 뜻)
+PAGE_NUMBER_STYLES = [("1", "{page}"), ("1 / n", "{page} / {total}"), ("- 1 -", "- {page} -"),
+                      ("페이지 1", "페이지 {page}"), ("n 페이지 중 1", "{total} 페이지 중 {page}")]
+HF_SLOTS = ("left", "center", "right", "footer_left", "footer_center", "footer_right")  # header_footer 의 여섯 칸 이름
+
+
+def page_numbers(doc: fitz.Document, style: str = "{page}", position: str = "footer_center", start: int = 1,
+                 font_size: float = 11, margin_mm: float = 12.7, color=(0, 0, 0), pages=None,
+                 total: int | None = None) -> None:
+    """쪽 번호. style 은 PAGE_NUMBER_STYLES 의 자리표 글, position 은 HF_SLOTS 가운데 하나. in place."""
+    if position not in HF_SLOTS:
+        raise EngineError(f"쪽 번호 자리가 잘못됐습니다: {position}")
+    header_footer(doc, **{position: style}, font_size=font_size, margin_mm=margin_mm, pages=pages,
+                  start_number=start, color=color, total=total)
+
+
+# ── 꾸미기 표시: 넣은 것을 나중에 찾아 고치고 지운다 ─────────────────────
+# 꾸미기 하나를 쪽마다 폼 객체(XObject) 하나로 넣고, 그 객체에 /RPDFDeco(종류)·/RPDFSet(설정 JSON)을 단다.
+# 그냥 글·그림으로 그리면 본문과 섞여 다시 찾을 수 없었다(알PDF 의 추가·업데이트·삭제를 따라 함).
+DECO_KINDS = {"watermark": "워터마크", "background": "배경", "header_footer": "머리글 & 바닥글",
+              "page_number": "쪽 번호", "bates": "베이츠 번호"}
+
+
+def _deco_draw(kind: str, s: dict):
+    """종류·설정 → (그리는 함수(임시 쪽, 차례 k, 쪽 수 n), 모든 쪽이 같은 그림인지)."""
+    s = {k: v for k, v in s.items() if k != "pages"}
+    if kind == "watermark":
+        return (lambda d, i, k, n: watermark(d, pages=[i], **s)), True
+    if kind == "background":
+        return (lambda d, i, k, n: background(d, pages=[i], **s)), True
+    if kind == "header_footer":
+        st = int(s.pop("start_number", 1))
+        return (lambda d, i, k, n: header_footer(d, pages=[i], start_number=st + k, total=n + st - 1, **s)), False
+    if kind == "page_number":
+        st = int(s.pop("start", 1))
+        return (lambda d, i, k, n: page_numbers(d, pages=[i], start=st + k, total=n + st - 1, **s)), False
+    if kind == "bates":
+        st, rev = int(s.pop("start", 1)), bool(s.pop("reverse", False))
+        return (lambda d, i, k, n: bates_numbers(d, pages=[i], start=st + (n - 1 - k if rev else k), **s)), False
+    raise EngineError(f"모르는 꾸미기입니다: {kind}")
+
+
+def add_decoration(doc: fitz.Document, kind: str, pages=None, file_name: str | None = None, **settings) -> int:
+    """꾸미기를 넣는다(in place). 넣은 쪽 수. settings 는 종류마다 watermark·background·header_footer·page_numbers·
+    bates_numbers 의 인자 그대로이고, 문서 안에 같이 적어 두어 「업데이트」 때 대화상자에 다시 채운다."""
+    if kind == "header_footer":   # 파일 이름은 넣을 때의 이름으로 굳는다(임시 문서에는 이름이 없다)
+        settings["file_name"] = file_name if file_name is not None else _file_stem(doc)
+    draw, same = _deco_draw(kind, settings)
+    targets = _pages(doc, pages)
+    n = len(targets)
+    tmp = fitz.open()
+    try:
+        # 1) 임시 문서에 쪽마다 그린다. 쪽과 같은 크기·회전으로 그린 뒤 회전만 0 으로 되돌리면
+        #    그 쪽에 바로 그렸을 때와 같은 회전 전 좌표의 그림이 된다
+        src_of: list[int] = []
+        seen: dict[tuple, int] = {}
+        fonts: dict[str, int] = {}
+        for k, pno in enumerate(targets):
+            page = doc[pno]
+            cb = page.cropbox
+            key = (round(cb.width, 2), round(cb.height, 2), page.rotation)
+            if same and key in seen:
+                src_of.append(seen[key]); continue
+            t = tmp.new_page(width=cb.width, height=cb.height)
+            # 앞 쪽에 넣은 글꼴을 미리 걸어 둔다. 안 그러면 쪽마다 맑은 고딕을 새로 실어 300쪽에 10초 가까이 걸렸다
+            rt, rv = tmp.xref_get_key(t.xref, "Resources")
+            res = int(rv.split()[0]) if rt == "xref" else t.xref
+            for name, fx in fonts.items():
+                tmp.xref_set_key(res, f"Font/{name}" if rt == "xref" else f"Resources/Font/{name}", f"{fx} 0 R")
+            t.set_rotation(page.rotation)
+            draw(tmp, t.number, k, n)
+            t.set_rotation(0)
+            for f in t.get_fonts():
+                fonts.setdefault(f[4], f[0])
+            seen[key] = t.number; src_of.append(t.number)
+        # 2) 다 그린 뒤에 붙인다(붙이는 중에 임시 문서가 바뀌면 PyMuPDF 의 옮김 표가 어긋난다)
+        meta = fitz.get_pdf_str(json.dumps({k: v for k, v in settings.items()}, ensure_ascii=False))
+        for pno, src in zip(targets, src_of):
+            page = doc[pno]
+            rot = page.rotation
+            before = {x[1] for x in page.get_xobjects()}
+            page.set_rotation(0)   # 돌린 쪽에 그대로 붙이면 그림이 옆으로 눕는다
+            try:
+                page.show_pdf_page(page.rect, tmp, src, overlay=kind != "background", keep_proportion=False)
+            finally:
+                page.set_rotation(rot)
+            for x in page.get_xobjects():
+                if x[2] == 0 and x[1] not in before:
+                    doc.xref_set_key(x[0], "RPDFDeco", f"/{kind}")
+                    doc.xref_set_key(x[0], "RPDFSet", meta)
+    finally:
+        tmp.close()
+    return n
+
+
+def _deco_items(doc: fitz.Document, pno: int):
+    """쪽 pno 에 붙은 꾸미기: [(xref, 이름, 종류, 설정 JSON 글)]."""
+    out = []
+    for xref, name, ref, _bbox in doc[pno].get_xobjects():
+        if ref != 0:
+            continue
+        t, v = doc.xref_get_key(xref, "RPDFDeco")
+        if t == "name":
+            out.append((xref, name, v.lstrip("/"), doc.xref_get_key(xref, "RPDFSet")[1]))
+    return out
+
+
+def decorations(doc: fitz.Document, kind: str | None = None) -> list[dict]:
+    """문서 안의 꾸미기. 같은 설정끼리 묶어 [{"kind", "settings", "pages"}] (넣은 차례)."""
+    groups: dict[tuple, dict] = {}
+    for pno in range(doc.page_count):
+        for _x, _n, k, raw in _deco_items(doc, pno):
+            if kind and k != kind:
+                continue
+            g = groups.get((k, raw))
+            if g is None:
+                try:
+                    s = json.loads(raw)
+                except ValueError:
+                    s = {}
+                g = groups[(k, raw)] = {"kind": k, "settings": s, "pages": []}
+            if pno not in g["pages"]:
+                g["pages"].append(pno)
+    return list(groups.values())
+
+
+def remove_decorations(doc: fitz.Document, kind: str) -> int:
+    """kind 꾸미기를 모두 지운다(in place). 지운 수. 그린 내용 줄(「q /이름 Do Q」)과 쪽 자원의 이름을 같이 뺀다."""
+    gone = 0
+    for pno in range(doc.page_count):
+        items = [it for it in _deco_items(doc, pno) if it[2] == kind]
+        if not items:
+            continue
+        page = doc[pno]
+        names = [re.escape(name) for _x, name, _k, _r in items]
+        pat = re.compile(rb"q\s*/(?:" + "|".join(names).encode() + rb")\s+Do\s*Q")
+        for cx in page.get_contents():
+            data = doc.xref_stream(cx)
+            new = pat.sub(b"", data)
+            if new != data:
+                doc.update_stream(cx, new)
+        for _x, name, _k, _r in items:
+            doc.xref_set_key(page.xref, f"Resources/XObject/{name}", "null")
+            gone += 1
+    return gone
+
+
+def replace_decorations(doc: fitz.Document, kind: str, groups: Sequence[dict]) -> None:
+    """kind 꾸미기를 모두 지우고 groups([{"settings", "pages"}])로 다시 넣는다(업데이트). in place."""
+    remove_decorations(doc, kind)
+    for g in groups:
+        add_decoration(doc, kind, pages=g["pages"], **g["settings"])
 
 
 # ── 빈 쪽 삭제 · 기울기 보정 ────────────────────────────────────────────
@@ -618,11 +830,40 @@ def set_page_labels(doc: fitz.Document, start_page: int = 0, style: str = "D",
 
 
 # ── 보안 ────────────────────────────────────────────────────────────────
+# 암호화 방식(알PDF 와 같은 셋, 기본 128 bit AES)
+ENCRYPT_METHODS = {"aes128": fitz.PDF_ENCRYPT_AES_128, "aes256": fitz.PDF_ENCRYPT_AES_256, "rc4": fitz.PDF_ENCRYPT_RC4_128}
+
+
+def encryption_method(doc: fitz.Document) -> str | None:
+    """지금 문서의 암호화 방식(ENCRYPT_METHODS 열쇠). 암호가 없으면 None."""
+    s = ((doc.metadata or {}).get("encryption") or "").upper()
+    if not s:
+        return None
+    if "AES" in s:
+        return "aes256" if "256" in s else "aes128"
+    return "rc4"
+
+
 def encrypt(doc: fitz.Document, out_path: str, user_pw: str = "", owner_pw: str = "",
             allow_print: bool = True, allow_copy: bool = True, allow_modify: bool = True,
             allow_annotate: bool = True, allow_forms: bool = True, allow_accessibility: bool = True,
-            allow_assemble: bool = True, allow_print_hq: bool = True) -> str:
-    """AES-256 으로 암호를 걸어 저장."""
+            allow_assemble: bool = True, allow_print_hq: bool = True, method: str = "aes128") -> str:
+    """암호를 걸어 out_path 에 저장. method: aes128(기본) · aes256 · rc4."""
+    with open(out_path, "wb") as f:
+        f.write(encrypt_bytes(doc, user_pw, owner_pw, method, allow_print=allow_print, allow_copy=allow_copy,
+                              allow_modify=allow_modify, allow_annotate=allow_annotate, allow_forms=allow_forms,
+                              allow_accessibility=allow_accessibility, allow_assemble=allow_assemble,
+                              allow_print_hq=allow_print_hq)[0])
+    return out_path
+
+
+def encrypt_bytes(doc: fitz.Document, user_pw: str = "", owner_pw: str = "", method: str = "aes128",
+                  allow_print: bool = True, allow_copy: bool = True, allow_modify: bool = True,
+                  allow_annotate: bool = True, allow_forms: bool = True, allow_accessibility: bool = True,
+                  allow_assemble: bool = True, allow_print_hq: bool = True) -> tuple[bytes, str]:
+    """암호를 건 PDF 바이트와 다시 열 때 쓸 권한 암호. 열린 문서에 걸 때는 Document.security 에 이 인자를 넣어 두면
+    다음 저장에서 이것으로 쓴다(알PDF 「암호화」 와 같은 흐름. 창을 닫는 순간 파일이 바뀌지 않음)."""
+    check_encrypt_args(user_pw, owner_pw, method)
     perm = 0
     for flag, allowed in (
         (fitz.PDF_PERM_PRINT, allow_print), (fitz.PDF_PERM_COPY, allow_copy),
@@ -632,19 +873,37 @@ def encrypt(doc: fitz.Document, out_path: str, user_pw: str = "", owner_pw: str 
     ):
         if allowed:
             perm |= flag
-    if not user_pw and not owner_pw:
-        raise EngineError("사용자 암호나 소유자 암호 가운데 하나는 넣어야 합니다")
     # 권한 암호를 비우면 전에는 열기 암호가 권한 암호로도 쓰여, 열기 암호로 열면 인쇄·복사 막기가 무의미했다
     import secrets
     from .document import plain_bytes
+    owner = owner_pw or secrets.token_urlsafe(18)
     work = fitz.open("pdf", plain_bytes(doc))  # 열린 문서의 글꼴을 줄이면 이어서 넣는 글자가 빠진다. 사본에서.
     try:
         _subset(work)
-        work.save(out_path, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw=owner_pw or secrets.token_urlsafe(18),
-                  user_pw=user_pw, permissions=perm, garbage=3, deflate=True)
+        data = work.tobytes(encryption=ENCRYPT_METHODS[method], owner_pw=owner, user_pw=user_pw,
+                            permissions=perm, garbage=3, deflate=True)
     finally:
         work.close()
-    return out_path
+    chk = fitz.open("pdf", data)   # 암호가 정말 걸렸는지 다시 열어 본다(안 걸린 채 「암호화」 로 넘어가지 않게)
+    try:
+        if not (chk.metadata or {}).get("encryption") and not chk.needs_pass:
+            raise EngineError("암호를 걸지 못했습니다(암호에 쓸 수 없는 글자가 있는지 보세요)")
+    finally:
+        chk.close()
+    return data, owner
+
+
+def check_encrypt_args(user_pw: str = "", owner_pw: str = "", method: str = "aes128") -> None:
+    """암호를 걸기 전에 확인(창을 닫기 전에 부른다). 틀리면 EngineError."""
+    if method not in ENCRYPT_METHODS:
+        raise EngineError(f"암호화 방식이 잘못됐습니다: {method}")
+    if not user_pw and not owner_pw:
+        raise EngineError("열기 암호나 권한 암호 가운데 하나는 넣어야 합니다")
+    if user_pw and owner_pw and user_pw == owner_pw:
+        raise EngineError("열기 암호와 권한 암호는 달라야 합니다(같으면 열기 암호로 권한 제한이 풀립니다)")
+    # 128 bit 방식(AES·RC4)은 암호를 영문 글자로만 다룬다. 한글 암호를 넣으면 MuPDF 가 말없이 암호 없는 파일을 만든다
+    if method != "aes256" and not (user_pw + owner_pw).isascii():
+        raise EngineError("128 bit 방식은 영문·숫자·기호 암호만 됩니다. 한글 암호를 쓰려면 256 bit AES 를 고르세요")
 
 
 def is_encrypted(path: str) -> bool:
@@ -993,11 +1252,21 @@ def _form_values(fields: list[dict]) -> dict[str, object]:
     return data
 
 
-def export_form_data(doc: fitz.Document, out_path: str) -> str:
-    """양식 값을 JSON(기본) 또는 CSV(.csv) 로."""
+def export_form_data(doc: fitz.Document, out_path: str, pdf_name: str | None = None) -> str:
+    """양식 값을 FDF(.fdf)·XFDF(.xfdf)·CSV(.csv)·JSON(그 밖) 으로. pdf_name: FDF 에 적을 원본 PDF 이름."""
     fields = form_fields(doc)
     data = _form_values(fields)
-    if out_path.lower().endswith(".csv"):
+    ext = os.path.splitext(out_path)[1].lower()
+    if ext in (".fdf", ".xfdf"):
+        kinds = {fd["name"]: fd["type_id"] for fd in fields}
+        if pdf_name is None:   # 바이트로 연 문서는 이름이 「pdf」 다
+            pdf_name = os.path.basename(getattr(doc, "name", "") or "")
+            pdf_name = pdf_name if pdf_name.lower().endswith(".pdf") else ""
+        text = (_fdf_text if ext == ".fdf" else _xfdf_text)(data, kinds, pdf_name)
+        with open(out_path, "wb") as f:
+            f.write(text if isinstance(text, bytes) else text.encode("utf-8"))
+        return out_path
+    if ext == ".csv":
         first = {}
         for fd in fields:
             first.setdefault(fd["name"], fd)
@@ -1016,9 +1285,18 @@ _ON = ("1", "true", "yes", "on", "예")
 
 
 def import_form_data(doc: fitz.Document, path: str) -> int:
-    """JSON({name: value} 또는 {"fields": {...}}) · CSV(name,value 열) 를 읽어 채운다. 채운 칸 이름 수. in place."""
+    """FDF · XFDF · JSON({name: value} 또는 {"fields": {...}}) · CSV(name,value 열) 를 읽어 채운다. 채운 칸 이름 수. in place."""
     values: dict[str, object] = {}
-    if path.lower().endswith(".csv"):
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".fdf", ".xfdf"):
+        with open(path, "rb") as f:
+            raw = f.read()
+        try:
+            values = _read_fdf(raw) if ext == ".fdf" else _read_xfdf(raw)
+        except Exception as e:  # noqa: BLE001
+            raise EngineError(f"양식 자료 파일을 읽지 못했습니다: {os.path.basename(path)}") from e
+        return _fill_values(doc, values)
+    if ext == ".csv":
         with open(path, encoding="utf-8-sig", newline="") as f:
             rd = csv.DictReader(f)
             for row in rd:
@@ -1032,6 +1310,10 @@ def import_form_data(doc: fitz.Document, path: str) -> int:
         if not isinstance(data, dict):
             raise EngineError("양식 자료 파일 모양이 맞지 않습니다")
         values = data
+    return _fill_values(doc, values)
+
+
+def _fill_values(doc: fitz.Document, values: dict[str, object]) -> int:
     done: set[str] = set()
     for page in doc:
         radios = []
@@ -1045,8 +1327,10 @@ def import_form_data(doc: fitz.Document, path: str) -> int:
             if w.field_type == fitz.PDF_WIDGET_TYPE_CHECKBOX:
                 on = (w.on_state() or "").lower()
                 w.field_value = bool(v) if not isinstance(v, str) else v.strip().lower() in _ON + (on,)
+            elif isinstance(v, (list, tuple)) and w.field_type == fitz.PDF_WIDGET_TYPE_LISTBOX:
+                w.field_value = [str(x) for x in v]
             else:
-                w.field_value = "" if v is None else str(v)
+                w.field_value = "" if v is None else (", ".join(map(str, v)) if isinstance(v, (list, tuple)) else str(v))
             save_widget(w)
             done.add(w.field_name)
         radios.sort(key=lambda w: str(values[w.field_name]) == (w.on_state() or ""))
@@ -1057,11 +1341,267 @@ def import_form_data(doc: fitz.Document, path: str) -> int:
     return len(done)
 
 
+# FDF·XFDF: 다른 PDF 프로그램(알PDF·아크로뱃)과 양식 값을 주고받는 표준 꼴
+def _fdf_value(v, kind: int) -> str:
+    if kind in (fitz.PDF_WIDGET_TYPE_CHECKBOX, fitz.PDF_WIDGET_TYPE_RADIOBUTTON):
+        name = "Off" if v in (None, "", False, "Off") else ("Yes" if v is True else str(v))
+        return "/" + re.sub(r"[^!-~]|[()<>\[\]{}/%#]", lambda m: "#%02X" % ord(m.group()) if ord(m.group()) < 256 else "", name)
+    if isinstance(v, (list, tuple)):
+        return "[" + " ".join(fitz.get_pdf_str(str(x)) for x in v) + "]"
+    return fitz.get_pdf_str("" if v is None else str(v))
+
+
+def _fdf_text(data: dict, kinds: dict, pdf_name: str) -> bytes:
+    rows = "\n".join(f"<</T {fitz.get_pdf_str(name)} /V {_fdf_value(v, kinds.get(name, 0))}>>" for name, v in data.items())
+    body = (f"%FDF-1.2\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<</FDF <</Fields [\n{rows}\n]"
+            + (f" /F {fitz.get_pdf_str(pdf_name)}" if pdf_name else "") + ">> >>\nendobj\ntrailer\n<</Root 1 0 R>>\n%%EOF\n")
+    return body.encode("latin-1", errors="replace")
+
+
+def _xfdf_text(data: dict, kinds: dict, pdf_name: str) -> str:
+    from xml.sax.saxutils import escape, quoteattr
+    out = ['<?xml version="1.0" encoding="UTF-8"?>', '<xfdf xmlns="http://ns.adobe.com/xfdf/" xml:space="preserve">']
+    if pdf_name:
+        out.append(f"<f href={quoteattr(pdf_name)}/>")
+    out.append("<fields>")
+    for name, v in data.items():
+        if kinds.get(name) in (fitz.PDF_WIDGET_TYPE_CHECKBOX, fitz.PDF_WIDGET_TYPE_RADIOBUTTON):
+            v = "Off" if v in (None, "", False, "Off") else ("Yes" if v is True else v)
+        vals = v if isinstance(v, (list, tuple)) else [v]
+        out.append(f"<field name={quoteattr(name)}>" + "".join(f"<value>{escape('' if x is None else str(x))}</value>" for x in vals) + "</field>")
+    out += ["</fields>", "</xfdf>", ""]
+    return "\n".join(out)
+
+
+def _read_xfdf(raw: bytes) -> dict[str, object]:
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(raw)
+    out: dict[str, object] = {}
+
+    def walk(el, prefix: str):
+        for f in el:
+            if f.tag.rsplit("}", 1)[-1] != "field":
+                continue
+            name = f"{prefix}.{f.get('name')}" if prefix else (f.get("name") or "")
+            vals = [v.text or "" for v in f if v.tag.rsplit("}", 1)[-1] in ("value", "value-richtext")]
+            if vals:
+                out[name] = vals[0] if len(vals) == 1 else vals
+            walk(f, name)   # 점으로 이은 이름은 칸 안의 칸으로 들어 있다
+
+    for fields in root.iter():
+        if fields.tag.rsplit("}", 1)[-1] == "fields":
+            walk(fields, "")
+    return out
+
+
+_PDF_TOKEN = re.compile(rb"\s*(<<|>>|\[|\]|\(|<[0-9A-Fa-f\s]*>|/[^\s/<>\[\]()%]*|[^\s/<>\[\]()%]+|%[^\r\n]*)")
+
+
+def _pdf_parse(raw: bytes, pos: int = 0):
+    """FDF 안의 PDF 값 하나를 읽는다 → (값, 다음 자리). 사전은 dict, 배열은 list, 이름은 '/이름', 글은 str."""
+    while True:
+        m = _PDF_TOKEN.match(raw, pos)
+        if not m:
+            raise ValueError("FDF 를 읽지 못했습니다")
+        tok, pos = m.group(1), m.end()
+        if not tok.startswith(b"%"):
+            break
+    if tok == b"<<":
+        d = {}
+        while True:
+            m = re.compile(rb"\s*(>>|/[^\s/<>\[\]()%]*)").match(raw, pos)
+            if m.group(1) == b">>":
+                return d, m.end()
+            key, pos = m.group(1)[1:].decode("latin-1"), m.end()
+            d[key], pos = _pdf_parse(raw, pos)
+    if tok == b"[":
+        arr = []
+        while True:
+            m = re.compile(rb"\s*\]").match(raw, pos)
+            if m:
+                return arr, m.end()
+            v, pos = _pdf_parse(raw, pos)
+            arr.append(v)
+    if tok == b"(":
+        buf, depth, k = bytearray(), 1, pos
+        esc = {ord("n"): b"\n", ord("r"): b"\r", ord("t"): b"\t", ord("b"): b"\b", ord("f"): b"\f"}
+        while k < len(raw):
+            c = raw[k]
+            if c == 0x5C:  # \
+                n = raw[k + 1]
+                if n in esc:
+                    buf += esc[n]; k += 2
+                elif 0x30 <= n <= 0x37:
+                    oct_ = re.match(rb"[0-7]{1,3}", raw[k + 1:k + 4]).group()
+                    buf.append(int(oct_, 8) & 255); k += 1 + len(oct_)
+                elif n in (0x0D, 0x0A):
+                    k += 2 + (n == 0x0D and raw[k + 2:k + 3] == b"\n")
+                else:
+                    buf.append(n); k += 2
+                continue
+            if c == 0x28:
+                depth += 1
+            elif c == 0x29:
+                depth -= 1
+                if depth == 0:
+                    return _pdf_text(bytes(buf)), k + 1
+            buf.append(c); k += 1
+        raise ValueError("글이 끝나지 않았습니다")
+    if tok.startswith(b"<"):
+        h = re.sub(rb"\s", b"", tok[1:-1])
+        return _pdf_text(bytes.fromhex((h + b"0" * (len(h) % 2)).decode())), pos
+    if tok.startswith(b"/"):
+        return "/" + re.sub(r"#([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), tok[1:].decode("latin-1")), pos
+    m = re.compile(rb"\s+(\d+)\s+R(?![^\s/<>\[\]()%])").match(raw, pos) if tok.isdigit() else None
+    if m:   # 「12 0 R」: 따로 적힌 객체를 가리킨다
+        return ("ref", int(tok)), m.end()
+    return tok.decode("latin-1"), pos   # 숫자·true·false
+
+
+def _pdf_text(b: bytes) -> str:
+    if b.startswith(b"\xfe\xff"):
+        return b[2:].decode("utf-16-be", errors="replace")
+    if b.startswith(b"\xef\xbb\xbf"):
+        return b[3:].decode("utf-8", errors="replace")
+    return b.decode("latin-1")
+
+
+def _read_fdf(raw: bytes) -> dict[str, object]:
+    k = raw.find(b"/Fields")
+    if k < 0:
+        return {}
+    fields, _ = _pdf_parse(raw, k + len(b"/Fields"))
+    out: dict[str, object] = {}
+
+    def deref(v, depth=0):
+        if isinstance(v, tuple) and depth < 4:
+            m = re.search(rb"(?<!\d)%d\s+0\s+obj" % v[1], raw)
+            return deref(_pdf_parse(raw, m.end())[0], depth + 1) if m else None
+        return v
+
+    def walk(items, prefix: str):
+        items = deref(items)
+        for f in items if isinstance(items, list) else []:
+            f = deref(f)
+            if not isinstance(f, dict):
+                continue
+            f = {key: deref(val) for key, val in f.items()}
+            name = f"{prefix}.{f.get('T', '')}" if prefix else str(f.get("T", ""))
+            if "V" in f:
+                v = f["V"]
+                out[name] = v[1:] if isinstance(v, str) and v.startswith("/") else v
+            walk(f.get("Kids"), name)
+
+    walk(fields, "")
+    return out
+
+
+def _field_key(doc: fitz.Document, xref: int, key: str) -> tuple[str, str]:
+    """칸의 열쇠 값. 없으면 부모(라디오 묶음 등)에서 물려받은 것."""
+    for _ in range(8):
+        t, v = doc.xref_get_key(xref, key)
+        if t != "null":
+            return t, v
+        pt, pv = doc.xref_get_key(xref, "Parent")
+        if pt != "xref":
+            break
+        xref = int(pv.split()[0])
+    return "null", ""
+
+
 def reset_form(doc: fitz.Document) -> None:
-    """양식 값을 전부 비운다. in place."""
+    """양식 값을 칸마다 저장된 기본값(DV)으로 되돌린다. 기본값이 없는 칸은 비운다. in place."""
+    for page in doc:
+        radios = []
+        for w in page.widgets():
+            t, dv = _field_key(doc, w.xref, "DV")
+            if w.field_type in (fitz.PDF_WIDGET_TYPE_RADIOBUTTON, fitz.PDF_WIDGET_TYPE_CHECKBOX):
+                on = t == "name" and dv == "/" + (w.on_state() or "")
+                if w.field_type == fitz.PDF_WIDGET_TYPE_RADIOBUTTON:
+                    radios.append((on, w)); continue
+                w.field_value = on
+                save_widget(w)
+            elif t == "string":
+                w.field_value = dv   # xref_get_key 는 글을 풀어서 준다
+                save_widget(w)
+            elif t == "array" and w.field_type == fitz.PDF_WIDGET_TYPE_LISTBOX:
+                w.field_value = [x for x in re.findall(r"\((.*?)\)", dv)]
+                save_widget(w)
+            else:
+                reset_widget(w)
+        for on, w in sorted(radios, key=lambda r: r[0]):   # 끌 것 먼저, 켤 것 나중
+            w.field_value = on
+            save_widget(w)
+
+
+def set_form_defaults(doc: fitz.Document) -> int:
+    """지금 값을 칸마다 기본값(DV)으로 적는다(「재설정」 이 이 값으로 돌아감). 적은 칸 수. in place."""
+    n = 0
+    seen: set[int] = set()
     for page in doc:
         for w in page.widgets():
-            reset_widget(w)
+            holder = w.xref
+            pt, pv = doc.xref_get_key(w.xref, "Parent")
+            if w.field_type == fitz.PDF_WIDGET_TYPE_RADIOBUTTON and pt == "xref":
+                holder = int(pv.split()[0])   # 라디오는 묶음(부모)에 값이 있다
+            if holder in seen:
+                continue
+            seen.add(holder)
+            t, v = _field_key(doc, holder, "V")
+            doc.xref_set_key(holder, "DV", fitz.get_pdf_str(v) if t == "string" else v if t != "null" else "null")
+            n += 1
+    return n
+
+
+def align_widgets(doc: fitz.Document, items: Sequence[tuple[int, int]], how: str) -> int:
+    """양식 칸 여럿을 맞춘다. items=(쪽, xref). 맞춘 칸 수. in place.
+
+    how: left·right·top·bottom·hcenter·vcenter 는 고른 칸을 다 합친 사각형 기준(알PDF 와 같음),
+         page_h·page_v·page_both 는 쪽 가운데, dist_h·dist_v 는 같은 간격으로 벌리기(셋 이상)."""
+    held = {}
+    ws = []
+    for pg, xref in items:
+        p = held.setdefault(pg, doc[pg])   # 쪽을 붙잡아 둔다(놓치면 update 가 「Annot is not bound to a page」)
+        ws += [(pg, w) for w in p.widgets() if w.xref == xref]
+    if not ws:
+        return 0
+    rects = [fitz.Rect(w.rect) for _, w in ws]
+    u = fitz.Rect(rects[0])
+    for r in rects[1:]:
+        u |= r
+    new = [fitz.Rect(r) for r in rects]
+    if how in ("dist_h", "dist_v"):
+        if len(ws) < 3:
+            raise EngineError("같은 간격으로 벌리려면 칸을 셋 이상 고르세요")
+        a = 0 if how == "dist_h" else 1
+        order = sorted(range(len(rects)), key=lambda k: (rects[k].x0, rects[k].y0)[a])
+        size = sum((rects[k].width, rects[k].height)[a] for k in order)
+        span = (u.width, u.height)[a]
+        gap = (span - size) / (len(order) - 1)
+        pos = (u.x0, u.y0)[a]
+        for k in order:
+            r = new[k]
+            if a == 0:
+                r.x1, r.x0 = pos + r.width, pos
+            else:
+                r.y1, r.y0 = pos + r.height, pos
+            pos += (r.width, r.height)[a] + gap
+    for (pg, _), r in zip(ws, new):
+        page_r = held[pg].rect
+        w_, h_ = r.width, r.height
+        if how == "left": r.x0 = u.x0
+        elif how == "right": r.x0 = u.x1 - w_
+        elif how == "top": r.y0 = u.y0
+        elif how == "bottom": r.y0 = u.y1 - h_
+        elif how == "hcenter": r.x0 = (u.x0 + u.x1 - w_) / 2
+        elif how == "vcenter": r.y0 = (u.y0 + u.y1 - h_) / 2
+        if how in ("page_h", "page_both"): r.x0 = (page_r.width - w_) / 2
+        if how in ("page_v", "page_both"): r.y0 = (page_r.height - h_) / 2
+        r.x1, r.y1 = r.x0 + w_, r.y0 + h_
+    for (_, w), r in zip(ws, new):
+        w.rect = r
+        save_widget(w)
+    return len(ws)
 
 
 def extract_data(docs_paths: Sequence[str], out_xlsx: str, progress: Progress = None) -> str:

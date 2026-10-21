@@ -73,25 +73,45 @@ class ColorButton(QToolButton):
 
 
 class PageRangeEdit(QWidget):
-    def __init__(self, total: int, current: int = 0, parent=None):
+    """전체 / 지금 쪽 / 범위. 홀수·짝수 거르기는 전체와 범위에 같이 걸린다(「짝수 쪽」 + 1-10 → 2·4·…·10쪽)."""
+    def __init__(self, total: int, current: int = 0, parent=None, odd_even: bool = False):
         super().__init__(parent)
         self.total = total
         lay = QVBoxLayout(self); lay.setContentsMargins(0, 0, 0, 0)
-        self.all = QRadioButton("전체"); self.all.setChecked(True)
+        top = QHBoxLayout()
+        self.all = QRadioButton("전체"); self.all.setChecked(True); top.addWidget(self.all)
+        self.which = QComboBox(); self.which.addItems(["모든 쪽", "홀수 쪽", "짝수 쪽"]); self.which.setVisible(odd_even); self.odd_even = odd_even
+        top.addWidget(self.which); top.addStretch(1)
         self.cur = QRadioButton(f"지금 쪽({current + 1})")
         row = QHBoxLayout()
         self.rng = QRadioButton("범위"); self.edit = QLineEdit(); self.edit.setPlaceholderText("예: 1-3, 5, 8-")
         self.edit.textEdited.connect(lambda: self.rng.setChecked(True))
         row.addWidget(self.rng); row.addWidget(self.edit)
-        lay.addWidget(self.all); lay.addWidget(self.cur); lay.addLayout(row)
+        lay.addLayout(top); lay.addWidget(self.cur); lay.addLayout(row)
         self.current = current
 
+    def set_pages(self, pages: list[int]):
+        """고른 쪽들로 채운다. 전체·홀수·짝수와 같으면 그것을, 아니면 범위 글로."""
+        pages = sorted(set(pages))
+        every = list(range(self.total))
+        for k, how in enumerate(("all", "odd", "even")):
+            if pages == P.subset(every, how) and (k == 0 or self.odd_even):
+                self.all.setChecked(True); self.which.setCurrentIndex(k); return
+        if pages == [self.current]:
+            self.cur.setChecked(True); return
+        self.rng.setChecked(True); self.edit.setText(P.format_range(pages))
+
     def pages(self) -> list[int]:
+        how = ("all", "odd", "even")[self.which.currentIndex()] if self.odd_even else "all"
         if self.all.isChecked():
-            return list(range(self.total))
-        if self.cur.isChecked():
+            got = P.subset(range(self.total), how)
+        elif self.cur.isChecked():
             return [self.current]
-        return P.parse_range(self.edit.text(), self.total)
+        else:
+            got = P.subset(P.parse_range(self.edit.text(), self.total), how)
+        if not got:
+            raise ValueError("고른 범위에 쪽이 없습니다")
+        return got
 
 
 def _buttons(dlg: QDialog, ok_text: str = "확인") -> QDialogButtonBox:
@@ -193,6 +213,31 @@ class FieldPropsDialog(FormDialog):
     def values(self) -> dict:
         return {"name": self.name.text(), "value": self.value.text(),
                 "options": [l for l in self.options.toPlainText().splitlines() if l.strip()]}
+
+
+class FieldAlignDialog(FormDialog):
+    """한 쪽의 양식 칸을 여럿 골라 맞춘다. 뷰어에서 고른 칸은 미리 체크해 둔다."""
+    HOWS = [("left", "왼쪽 맞춤"), ("right", "오른쪽 맞춤"), ("top", "위쪽 맞춤"), ("bottom", "아래쪽 맞춤"),
+            ("hcenter", "가로 가운데"), ("vcenter", "세로 가운데"), ("dist_h", "가로로 같은 간격"), ("dist_v", "세로로 같은 간격"),
+            ("page_h", "쪽 가로 가운데"), ("page_v", "쪽 세로 가운데"), ("page_both", "쪽 한가운데")]
+
+    def __init__(self, parent, page_no: int, widgets: list[tuple[int, str, str]], picked: set[int], how: str):
+        super().__init__(f"양식 칸 맞추기 · {page_no + 1}쪽", parent, "맞추기")
+        self.list = QListWidget()
+        for xref, name, kind in widgets:
+            it = QListWidgetItem(f"{name}  ({kind})"); it.setData(Qt.ItemDataRole.UserRole, xref)
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Checked if xref in picked or not picked else Qt.CheckState.Unchecked)
+            self.list.addItem(it)
+        self.list.setMinimumHeight(min(320, 26 * len(widgets) + 8))
+        self.add("맞출 칸", self.list)
+        self.how = self.add("맞추기", QComboBox()); self.how.addItems([l for _, l in self.HOWS])
+        self.how.setCurrentIndex(next((k for k, (h, _) in enumerate(self.HOWS) if h == how), 0))
+
+    def values(self) -> dict:
+        xs = [self.list.item(k).data(Qt.ItemDataRole.UserRole) for k in range(self.list.count())
+              if self.list.item(k).checkState() == Qt.CheckState.Checked]
+        return {"xrefs": xs, "how": self.HOWS[self.how.currentIndex()][0]}
 
 
 def fill_field(parent, widget: fitz.Widget):
@@ -322,6 +367,27 @@ class CropDialog(FormDialog):
         return {"rect": fitz.Rect(v["x0"], v["y0"], v["x1"], v["y1"]), "pages": self.pages.pages()}
 
 
+class SplitGridDialog(FormDialog):
+    """쪽 하나를 가로·세로 칸으로 나눠 여러 쪽으로(스캔한 두 쪽 펼침 나누기)."""
+    def __init__(self, parent, total: int, current: int, pages: list[int] | None = None):
+        super().__init__("페이지 분할", parent, "나누기")
+        self.cols = self.add("가로 칸", QSpinBox()); self.cols.setRange(1, 10); self.cols.setValue(2)
+        self.rows = self.add("세로 칸", QSpinBox()); self.rows.setRange(1, 10); self.rows.setValue(1)
+        self.preview = self.add("결과", QLabel())
+        self.pages = self.add("나눌 쪽", PageRangeEdit(total, current, odd_even=True))
+        if pages and len(pages) > 1:
+            self.pages.set_pages(pages)
+        self.cols.valueChanged.connect(self._sync); self.rows.valueChanged.connect(self._sync); self._sync()
+
+    def _sync(self):
+        n = self.cols.value() * self.rows.value()
+        self.preview.setText(f"한 쪽 → {n}쪽 · 왼쪽 위부터 오른쪽, 다음 줄 차례" if n > 1 else "나눌 칸이 없습니다")
+        self.bb.button(QDialogButtonBox.StandardButton.Ok).setEnabled(n > 1)
+
+    def values(self) -> dict:
+        return {"cols": self.cols.value(), "rows": self.rows.value(), "pages": self.pages.pages()}
+
+
 class ResizeDialog(FormDialog):
     def __init__(self, parent, total: int, current: int):
         super().__init__("쪽 크기", parent)
@@ -374,10 +440,26 @@ class PageBoxDialog(FormDialog):
         return {"box": self.box.currentText().split("(")[0], "rect": fitz.Rect(v["x0"], v["y0"], v["x1"], v["y1"]), "pages": self.pages.pages()}
 
 
-# ── 꾸미기: 워터마크·배경·머리글·베이츠 ───────────────────────────
-class WatermarkDialog(FormDialog):
-    def __init__(self, parent, total: int, current: int, props: dict):
-        super().__init__("워터마크", parent, "넣기")
+# ── 꾸미기: 워터마크·배경·머리글·쪽 번호·베이츠 ─────────────────
+# 대화상자마다 values() 가 엔진(add_decoration) 설정 그대로이고, load() 가 문서에 적어 둔 설정을 다시 채운다(업데이트).
+class DecoDialog(FormDialog):
+    def __init__(self, title: str, parent, total: int, current: int, update: bool):
+        super().__init__(f"{title} 업데이트" if update else title, parent, "적용" if update else "넣기")
+        self._range = (total, current)
+
+    def add_pages(self):
+        self.pages = self.add("적용할 쪽", PageRangeEdit(*self._range, odd_even=True))
+
+    def load(self, settings: dict, pages: list[int]):
+        self.pages.set_pages(pages)
+
+
+class WatermarkDialog(DecoDialog):
+    POS = [("center", "가운데"), ("top_left", "왼쪽 위"), ("top_right", "오른쪽 위"), ("bottom_left", "왼쪽 아래"),
+           ("bottom_right", "오른쪽 아래"), ("tile", "바둑판")]
+
+    def __init__(self, parent, total: int, current: int, props: dict | None = None, update: bool = False):
+        super().__init__("워터마크", parent, total, current, update)
         self.kind = self.add("종류", QComboBox()); self.kind.addItems(["글자", "이미지"])
         self.text = self.add("글자", QLineEdit("대외비"))
         row = QWidget(); hl = QHBoxLayout(row); hl.setContentsMargins(0, 0, 0, 0)
@@ -387,9 +469,9 @@ class WatermarkDialog(FormDialog):
         self.color = self.add("색", ColorButton((0.5, 0.5, 0.5)))
         self.opacity = self.add("불투명도", QDoubleSpinBox()); self.opacity.setRange(0.05, 1); self.opacity.setSingleStep(0.05); self.opacity.setValue(0.3)
         self.rotate = self.add("회전(도)", QSpinBox()); self.rotate.setRange(-180, 180); self.rotate.setValue(45)
-        self.pos = self.add("자리", QComboBox()); self.pos.addItems(["가운데", "왼쪽 위", "오른쪽 위", "왼쪽 아래", "오른쪽 아래", "바둑판"])
+        self.pos = self.add("자리", QComboBox()); self.pos.addItems([l for _, l in self.POS])
         self.scale = self.add("이미지 배율", QDoubleSpinBox()); self.scale.setRange(0.05, 5); self.scale.setValue(0.5)
-        self.pages = self.add("적용할 쪽", PageRangeEdit(total, current))
+        self.add_pages()
         self.kind.currentIndexChanged.connect(self._sync); self._sync()
 
     def _sync(self):
@@ -402,29 +484,45 @@ class WatermarkDialog(FormDialog):
         if p:
             self.image.setText(p)
 
+    def load(self, s: dict, pages: list[int]):
+        self.kind.setCurrentIndex(1 if s.get("image_path") else 0)
+        self.text.setText(s.get("text") or ""); self.image.setText(s.get("image_path") or "")
+        self.size.setValue(int(s.get("font_size", 48))); self.color.color = tuple(s.get("color") or (0.5, 0.5, 0.5)); self.color._paint()
+        self.opacity.setValue(float(s.get("opacity", 0.3))); self.rotate.setValue(int(s.get("rotate", 45)))
+        self.pos.setCurrentIndex(next((k for k, (key, _) in enumerate(self.POS) if key == s.get("position")), 0))
+        self.scale.setValue(float(s.get("scale", 0.5)))
+        super().load(s, pages)
+
     def values(self) -> dict:
-        pos = ["center", "top_left", "top_right", "bottom_left", "bottom_right", "tile"][self.pos.currentIndex()]
         return {"text": self.text.text() if self.kind.currentIndex() == 0 else None,
                 "image_path": self.image.text() if self.kind.currentIndex() == 1 else None,
                 "opacity": self.opacity.value(), "rotate": self.rotate.value(), "font_size": self.size.value(),
-                "color": self.color.color, "position": pos, "pages": self.pages.pages(), "scale": self.scale.value()}
+                "color": self.color.color, "position": self.POS[self.pos.currentIndex()][0], "pages": self.pages.pages(),
+                "scale": self.scale.value()}
 
 
-class BackgroundDialog(FormDialog):
-    def __init__(self, parent, total: int, current: int):
-        super().__init__("배경", parent, "넣기")
+class BackgroundDialog(DecoDialog):
+    def __init__(self, parent, total: int, current: int, update: bool = False):
+        super().__init__("배경", parent, total, current, update)
         self.kind = self.add("종류", QComboBox()); self.kind.addItems(["색", "이미지"])
         self.color = self.add("색", ColorButton((1, 0.98, 0.9)))
         row = QWidget(); hl = QHBoxLayout(row); hl.setContentsMargins(0, 0, 0, 0)
         self.image = QLineEdit(); b = QPushButton("찾기"); b.clicked.connect(self._pick); hl.addWidget(self.image); hl.addWidget(b)
         self.add("이미지", row)
         self.opacity = self.add("불투명도", QDoubleSpinBox()); self.opacity.setRange(0.05, 1); self.opacity.setSingleStep(0.05); self.opacity.setValue(1.0)
-        self.pages = self.add("적용할 쪽", PageRangeEdit(total, current))
+        self.add_pages()
 
     def _pick(self):
         p, _ = QFileDialog.getOpenFileName(self, "배경 이미지", "", "이미지 (*.png *.jpg *.jpeg *.bmp)")
         if p:
             self.image.setText(p)
+
+    def load(self, s: dict, pages: list[int]):
+        self.kind.setCurrentIndex(1 if s.get("image_path") else 0)
+        if s.get("color"):
+            self.color.color = tuple(s["color"]); self.color._paint()
+        self.image.setText(s.get("image_path") or ""); self.opacity.setValue(float(s.get("opacity", 1.0)))
+        super().load(s, pages)
 
     def values(self) -> dict:
         return {"color": self.color.color if self.kind.currentIndex() == 0 else None,
@@ -432,43 +530,149 @@ class BackgroundDialog(FormDialog):
                 "opacity": self.opacity.value(), "pages": self.pages.pages()}
 
 
-class HeaderFooterDialog(FormDialog):
-    def __init__(self, parent, total: int, current: int):
-        super().__init__("머리글 & 바닥글", parent, "넣기")
-        self.form.addRow(QLabel("쓸 수 있는 자리표: {page} 쪽 번호 · {total} 전체 쪽 수 · {date} 날짜 · {file} 파일 이름"))
-        self.hl = self.add("머리글 왼쪽", QLineEdit()); self.hc = self.add("머리글 가운데", QLineEdit()); self.hr = self.add("머리글 오른쪽", QLineEdit())
-        self.fl = self.add("바닥글 왼쪽", QLineEdit()); self.fc = self.add("바닥글 가운데", QLineEdit("{page} / {total}")); self.fr = self.add("바닥글 오른쪽", QLineEdit())
+class HeaderFooterDialog(DecoDialog):
+    SLOTS = [("left", "머리글 왼쪽"), ("center", "머리글 가운데"), ("right", "머리글 오른쪽"),
+             ("footer_left", "바닥글 왼쪽"), ("footer_center", "바닥글 가운데"), ("footer_right", "바닥글 오른쪽")]
+
+    def __init__(self, parent, total: int, current: int, update: bool = False):
+        super().__init__("머리글 & 바닥글", parent, total, current, update)
+        self.form.addRow(QLabel("쓸 수 있는 자리표: {page} 쪽 번호 · {total} 마지막 번호 · {date} 날짜 · {file} 파일 이름"))
+        self.slots = {key: self.add(label, QLineEdit()) for key, label in self.SLOTS}
         self.size = self.add("글자 크기", QSpinBox()); self.size.setRange(5, 40); self.size.setValue(10)
         self.margin = self.add("여백(mm)", QDoubleSpinBox()); self.margin.setRange(2, 60); self.margin.setValue(12)
         self.start = self.add("첫 번호", QSpinBox()); self.start.setRange(0, 99999); self.start.setValue(1)
-        self.pages = self.add("적용할 쪽", PageRangeEdit(total, current))
+        self.add_pages()
+
+    def load(self, s: dict, pages: list[int]):
+        for key, e in self.slots.items():
+            e.setText(s.get(key) or "")
+        self.size.setValue(int(s.get("font_size", 10))); self.margin.setValue(float(s.get("margin_mm", 12)))
+        self.start.setValue(int(s.get("start_number", 1)))
+        super().load(s, pages)
 
     def values(self) -> dict:
-        return {"left": self.hl.text(), "center": self.hc.text(), "right": self.hr.text(),
-                "footer_left": self.fl.text(), "footer_center": self.fc.text(), "footer_right": self.fr.text(),
-                "font_size": self.size.value(), "margin_mm": self.margin.value(), "pages": self.pages.pages(),
-                "start_number": self.start.value()}
+        v = {key: e.text() for key, e in self.slots.items()}
+        if not any(v.values()):
+            raise ValueError("머리글·바닥글 칸에 글을 넣어 주세요")
+        v.update({"font_size": self.size.value(), "margin_mm": self.margin.value(), "pages": self.pages.pages(),
+                  "start_number": self.start.value()})
+        return v
 
 
-class BatesDialog(FormDialog):
-    def __init__(self, parent, total: int, current: int):
-        super().__init__("베이츠 번호", parent, "넣기")
-        self.prefix = self.add("접두어", QLineEdit("DOC-")); self.start = self.add("시작 번호", QSpinBox()); self.start.setRange(0, 9999999); self.start.setValue(1)
-        self.digits = self.add("자릿수", QSpinBox()); self.digits.setRange(1, 12); self.digits.setValue(6)
-        self.suffix = self.add("접미어", QLineEdit())
-        self.pos = self.add("자리", QComboBox()); self.pos.addItems(["바닥글 오른쪽", "바닥글 왼쪽", "바닥글 가운데", "머리글 오른쪽", "머리글 왼쪽", "머리글 가운데"])
+class PageNumberDialog(DecoDialog):
+    POS = [("footer_center", "바닥글 가운데"), ("footer_right", "바닥글 오른쪽"), ("footer_left", "바닥글 왼쪽"),
+           ("center", "머리글 가운데"), ("right", "머리글 오른쪽"), ("left", "머리글 왼쪽")]
+
+    def __init__(self, parent, total: int, current: int, update: bool = False):
+        super().__init__("쪽 번호", parent, total, current, update)
+        from ..engine.tools import PAGE_NUMBER_STYLES
+        self.styles = PAGE_NUMBER_STYLES
+        self.total = total
+        self.style = self.add("모양", QComboBox()); self.style.addItems([n for n, _ in self.styles])
+        self.pos = self.add("자리", QComboBox()); self.pos.addItems([l for _, l in self.POS])
+        self.start = self.add("첫 번호", QSpinBox()); self.start.setRange(0, 99999); self.start.setValue(1)
+        self.size = self.add("글자 크기", QSpinBox()); self.size.setRange(5, 72); self.size.setValue(11)
+        self.margin = self.add("여백(mm)", QDoubleSpinBox()); self.margin.setRange(2, 60); self.margin.setValue(12.7)
+        self.color = self.add("색", ColorButton((0, 0, 0)))
+        self.preview = self.add("보기", QLabel())
+        self.add_pages()
+        self.style.currentIndexChanged.connect(self._sync); self.start.valueChanged.connect(self._sync)
+        self.pages.edit.textChanged.connect(self._sync)
+        for w in (self.pages.all, self.pages.cur, self.pages.rng):
+            w.toggled.connect(self._sync)
+        self.pages.which.currentIndexChanged.connect(self._sync)
+        self._sync()
+
+    def _sync(self):
+        fmt = self.styles[self.style.currentIndex()][1]
+        try:
+            n = len(self.pages.pages())
+        except ValueError:
+            n = self.total
+        st = self.start.value()
+        last = n + st - 1
+        self.preview.setText(f"{fmt.format(page=st, total=last)}  ⋯  {fmt.format(page=last, total=last)}")
+
+    def load(self, s: dict, pages: list[int]):
+        self.style.setCurrentIndex(next((k for k, (_, f) in enumerate(self.styles) if f == s.get("style")), 0))
+        self.pos.setCurrentIndex(next((k for k, (key, _) in enumerate(self.POS) if key == s.get("position")), 0))
+        self.start.setValue(int(s.get("start", 1))); self.size.setValue(int(s.get("font_size", 11)))
+        self.margin.setValue(float(s.get("margin_mm", 12.7)))
+        if s.get("color"):
+            self.color.color = tuple(s["color"]); self.color._paint()
+        super().load(s, pages)
+        self._sync()
+
+    def values(self) -> dict:
+        return {"style": self.styles[self.style.currentIndex()][1], "position": self.POS[self.pos.currentIndex()][0],
+                "start": self.start.value(), "font_size": self.size.value(), "margin_mm": self.margin.value(),
+                "color": self.color.color, "pages": self.pages.pages()}
+
+
+class BatesDialog(DecoDialog):
+    POS = [("footer_right", "바닥글 오른쪽"), ("footer_left", "바닥글 왼쪽"), ("footer_center", "바닥글 가운데"),
+           ("header_right", "머리글 오른쪽"), ("header_left", "머리글 왼쪽"), ("header_center", "머리글 가운데")]
+
+    def __init__(self, parent, total: int, current: int, update: bool = False):
+        super().__init__("베이츠 번호", parent, total, current, update)
+        self.total = total
+        self.prefix = self.add("접두어", QLineEdit("DOC-")); self.prefix.setMaxLength(16)
+        # 자릿수는 시작 번호를 쓴 글자 수로 정한다(000001 → 여섯 자리)
+        self.start = self.add("시작 번호", QLineEdit("000001")); self.start.setMaxLength(12)
+        from PySide6.QtGui import QRegularExpressionValidator
+        from PySide6.QtCore import QRegularExpression
+        self.start.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d{1,12}"), self.start))
+        self.suffix = self.add("접미어", QLineEdit()); self.suffix.setMaxLength(16)
+        self.reverse = self.add("", QCheckBox("거꾸로(마지막 쪽이 시작 번호)"))
+        self.pos = self.add("자리", QComboBox()); self.pos.addItems([l for _, l in self.POS])
         self.size = self.add("글자 크기", QSpinBox()); self.size.setRange(5, 40); self.size.setValue(10)
-        self.pages = self.add("적용할 쪽", PageRangeEdit(total, current))
+        self.preview = self.add("보기", QLabel())
+        self.add_pages()
+        for e in (self.prefix, self.start, self.suffix):
+            e.textChanged.connect(self._sync)
+        self.reverse.toggled.connect(self._sync); self.pages.edit.textChanged.connect(self._sync)
+        for w in (self.pages.all, self.pages.cur, self.pages.rng):
+            w.toggled.connect(self._sync)
+        self.pages.which.currentIndexChanged.connect(self._sync)
+        self._sync()
+
+    def _num(self) -> tuple[int, int]:
+        t = self.start.text() or "1"
+        return int(t), len(t)
+
+    def _sync(self):
+        st, digits = self._num()
+        try:
+            n = len(self.pages.pages())
+        except ValueError:
+            n = self.total
+        a, b = f"{st:0{digits}d}", f"{st + n - 1:0{digits}d}"
+        if self.reverse.isChecked():
+            a, b = b, a
+        p, s = self.prefix.text(), self.suffix.text()
+        self.preview.setText(f"첫 쪽 {p}{a}{s}  ⋯  끝 쪽 {p}{b}{s}")
+
+    def load(self, s: dict, pages: list[int]):
+        self.prefix.setText(s.get("prefix", "")); self.suffix.setText(s.get("suffix", ""))
+        self.start.setText(f"{int(s.get('start', 1)):0{int(s.get('digits', 6))}d}")
+        self.reverse.setChecked(bool(s.get("reverse")))
+        self.pos.setCurrentIndex(next((k for k, (key, _) in enumerate(self.POS) if key == s.get("position")), 0))
+        self.size.setValue(int(s.get("font_size", 10)))
+        super().load(s, pages)
+        self._sync()
 
     def values(self) -> dict:
-        pos = ["footer_right", "footer_left", "footer_center", "header_right", "header_left", "header_center"][self.pos.currentIndex()]
-        return {"prefix": self.prefix.text(), "start": self.start.value(), "digits": self.digits.value(),
-                "suffix": self.suffix.text(), "position": pos, "font_size": self.size.value(), "pages": self.pages.pages()}
+        st, digits = self._num()
+        return {"prefix": self.prefix.text(), "start": st, "digits": digits, "suffix": self.suffix.text(),
+                "reverse": self.reverse.isChecked(), "position": self.POS[self.pos.currentIndex()][0],
+                "font_size": self.size.value(), "pages": self.pages.pages()}
 
 
 # ── 보안 ───────────────────────────────────────────────────────
 class EncryptDialog(FormDialog):
-    def __init__(self, parent):
+    METHODS = [("aes128", "128 bit AES"), ("aes256", "256 bit AES · 한글 암호 가능"), ("rc4", "128 bit RC4 · 옛 프로그램용")]
+
+    def __init__(self, parent, method: str | None = None):
         super().__init__("암호화", parent, "적용")
         self.open_pw = self.add("열기 암호", QLineEdit()); self.open_pw.setEchoMode(QLineEdit.EchoMode.Password)
         self.open_pw2 = self.add("열기 암호 확인", QLineEdit()); self.open_pw2.setEchoMode(QLineEdit.EchoMode.Password)
@@ -480,14 +684,39 @@ class EncryptDialog(FormDialog):
                                           ("allow_assemble", "쪽 구성"), ("allow_accessibility", "접근성 읽기"))):
             cb = QCheckBox(label); cb.setChecked(True); self.perms[key] = cb; gl.addWidget(cb, n // 2, n % 2)
         self.form.addRow(g)
+        box = QWidget(); vl = QVBoxLayout(box); vl.setContentsMargins(0, 0, 0, 0)
+        self.methods = {}
+        for key, label in self.METHODS:   # 알PDF 와 같이 128 bit AES 가 기본, 이미 걸린 문서는 그 방식
+            rb = QRadioButton(label); self.methods[key] = rb; vl.addWidget(rb)
+        self.methods.get(method or "aes128", self.methods["aes128"]).setChecked(True)
+        self.add("방식", box)
+        box2 = QWidget(); vl2 = QVBoxLayout(box2); vl2.setContentsMargins(0, 0, 0, 0)
+        self.here = QRadioButton("이 문서에 걸기 · 저장할 때 적용"); self.here.setChecked(True)
+        self.new_file = QRadioButton("암호 건 사본을 새 파일로 저장")
+        vl2.addWidget(self.here); vl2.addWidget(self.new_file)
+        self.add("적용", box2)
+
+    def accept(self):
+        if self.open_pw.text() != self.open_pw2.text():
+            QMessageBox.warning(self, "암호화", "열기 암호 두 칸이 다릅니다"); return
+        from ..engine.tools import EngineError, check_encrypt_args
+        try:   # 창을 닫기 전에 확인한다(같은 암호·한글 암호 등)
+            check_encrypt_args(self.open_pw.text(), self.owner_pw.text(), self._method())
+        except EngineError as e:
+            QMessageBox.warning(self, "암호화", str(e)); return
+        super().accept()
+
+    def _method(self) -> str:
+        return next(k for k, rb in self.methods.items() if rb.isChecked())
 
     def values(self) -> dict | None:
-        if self.open_pw.text() != self.open_pw2.text():
-            QMessageBox.warning(self, "암호화", "열기 암호 두 칸이 다릅니다"); return None
         # 권한 암호를 비우면 엔진이 무작위로 만든다(열기 암호를 권한 암호로 쓰면 인쇄·복사 막기가 무의미했다)
-        d = {"user_pw": self.open_pw.text(), "owner_pw": self.owner_pw.text()}
+        d = {"user_pw": self.open_pw.text(), "owner_pw": self.owner_pw.text(), "method": self._method()}
         d.update({k: cb.isChecked() for k, cb in self.perms.items()})
         return d
+
+    def to_new_file(self) -> bool:
+        return self.new_file.isChecked()
 
 
 class RedactSearchDialog(FormDialog):
@@ -526,14 +755,24 @@ class HiddenDataDialog(FormDialog):
 
 
 # ── 도구 ───────────────────────────────────────────────────────
+COMPRESS_CHOICES = [("high", "높음 · 이미지 72dpi, 용량 우선"), ("medium", "중간 · 이미지 120dpi"), ("low", "낮음 · 이미지 150dpi, 화질 우선")]
+
+
 class CompressDialog(FormDialog):
-    def __init__(self, parent, size_bytes: int):
+    """압축 정도는 마지막에 고른 것으로 연다(처음엔 높음)."""
+    def __init__(self, parent, size_bytes: int, level: str = "high", remove_metadata: bool = True):
         super().__init__("PDF 압축", parent, "압축")
         self.form.addRow("지금 크기", QLabel(f"{size_bytes / 1024:.0f} KB"))
-        self.level = self.add("정도", QComboBox()); self.level.addItems(["낮음(화질 우선)", "보통", "높음(용량 우선)"]); self.level.setCurrentIndex(1)
+        box = QWidget(); vl = QVBoxLayout(box); vl.setContentsMargins(0, 0, 0, 0)
+        self.levels = {}
+        for key, label in COMPRESS_CHOICES:
+            rb = QRadioButton(label); self.levels[key] = rb; vl.addWidget(rb)
+        self.levels.get(level, self.levels["high"]).setChecked(True)
+        self.add("정도", box)
+        self.meta = self.add("", QCheckBox("문서 정보·메타데이터 삭제")); self.meta.setChecked(remove_metadata)
 
     def values(self) -> dict:
-        return {"level": ["low", "medium", "high"][self.level.currentIndex()]}
+        return {"level": next(k for k, rb in self.levels.items() if rb.isChecked()), "remove_metadata": self.meta.isChecked()}
 
 
 class OcrDialog(FormDialog):
@@ -672,7 +911,7 @@ class BatchDialog(QDialog):
         self.fmt = QComboBox()
         for label, key in ConvertDialog.FORMATS: self.fmt.addItem(label, key)
         f.addRow("변환 형식", self.fmt)
-        self.level = QComboBox(); self.level.addItems(["낮음", "보통", "높음"]); self.level.setCurrentIndex(1); f.addRow("압축 정도", self.level)
+        self.level = QComboBox(); self.level.addItems([label for _, label in COMPRESS_CHOICES]); f.addRow("압축 정도", self.level)
         self.wm = QLineEdit("대외비"); f.addRow("워터마크 글자", self.wm)
         self.pw = QLineEdit(); self.pw.setEchoMode(QLineEdit.EchoMode.Password); f.addRow("열기 암호", self.pw)
         from PySide6.QtPrintSupport import QPrinterInfo
@@ -701,7 +940,7 @@ class BatchDialog(QDialog):
     def values(self) -> dict:
         k = self.op.currentData()
         target = {"docx": "word", "xlsx": "excel", "png": "images", "jpg": "images", "txt": "text"}.get(self.fmt.currentData(), self.fmt.currentData())
-        opts = {"convert": {"target": target, **({"fmt": "jpg"} if self.fmt.currentData() == "jpg" else {})}, "compress": {"level": ["low", "medium", "high"][self.level.currentIndex()]},
+        opts = {"convert": {"target": target, **({"fmt": "jpg"} if self.fmt.currentData() == "jpg" else {})}, "compress": {"level": COMPRESS_CHOICES[self.level.currentIndex()][0]},
                 "watermark": {"text": self.wm.text()}, "encrypt": {"user_pw": self.pw.text()}, "ocr": {}, "create": {},
                 "print": {"printer": self.printer.currentText()}}[k]
         return {"op": k, "inputs": self.files.paths(), "out_dir": self.out.text(), "options": opts}
@@ -838,7 +1077,10 @@ class Worker(QThread):
             res = self.fn(*self.args, progress=self._prog, **self.kwargs) if "progress" in self.fn.__code__.co_varnames else self.fn(*self.args, **self.kwargs)
             self.finished_ok.emit(res)
         except Exception as e:  # noqa: BLE001
-            self.failed.emit(f"{e}\n\n{traceback.format_exc()[-800:]}")
+            if any(c.__name__ in ("EngineError", "DocumentError") for c in type(e).__mro__):
+                self.failed.emit(f"!{e}")  # 한국어로 쓴 안내(코드 흔적 없이 주의 창으로)
+            else:
+                self.failed.emit(f"{e}\n\n{traceback.format_exc()[-800:]}")
 
     def _prog(self, done: int, total: int, msg: str = ""):
         self.progress.emit(done, total, msg)
@@ -875,6 +1117,9 @@ class ProgressDialog(QDialog):
         self.worker.start()
         self.exec()
         self.worker.wait(3000)
-        if self.error:
+        if self.error and self.error.startswith("!"):
+            self.error = self.error[1:]
+            QMessageBox.warning(self.parent(), self.windowTitle(), self.error)
+        elif self.error:
             QMessageBox.critical(self.parent(), self.windowTitle(), self.error.split("\n\n")[0])
         return self.result
