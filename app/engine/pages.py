@@ -47,6 +47,28 @@ def parse_range(spec: str, total: int) -> list[int]:
     return res
 
 
+def subset(pages: Iterable[int], how: str = "all") -> list[int]:
+    """홀수(odd)·짝수(even) 쪽만 거른다. 쪽 번호는 1부터 센 것 기준(0-based 0 = 1쪽 = 홀수). all 이면 그대로."""
+    if how == "odd":
+        return [p for p in pages if p % 2 == 0]
+    if how == "even":
+        return [p for p in pages if p % 2 == 1]
+    return list(pages)
+
+
+def format_range(pages: Iterable[int]) -> str:
+    """0-based 쪽 목록 → 「1,3-5」. 이어진 번호는 묶는다."""
+    nums = sorted({int(p) + 1 for p in pages})
+    out, k = [], 0
+    while k < len(nums):
+        j = k
+        while j + 1 < len(nums) and nums[j + 1] == nums[j] + 1:
+            j += 1
+        out.append(str(nums[k]) if j == k else f"{nums[k]}-{nums[j]}")
+        k = j + 1
+    return ",".join(out)
+
+
 def rotate(doc: Document, pages: Iterable[int], degrees: int):
     doc.snapshot()
     with doc.lock:
