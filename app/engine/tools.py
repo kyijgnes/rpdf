@@ -143,7 +143,11 @@ def _write_text(page: fitz.Page, point, text: str, fontsize: float, color, opaci
 
 
 def _text_width(text: str, fontsize: float) -> float:
-    return korean_font().text_length(text, fontsize=fontsize)
+    # 맑은 고딕을 부를 때마다 파일에서 읽으면 쪽 번호 300쪽에 몇 초가 걸린다. 한 번 읽어 둔다
+    f = _FONT_CACHE.get("font")
+    if f is None:
+        f = _FONT_CACHE["font"] = korean_font()
+    return f.text_length(text, fontsize=fontsize)
 
 
 # ── 압축 ────────────────────────────────────────────────────────────────
@@ -415,13 +419,17 @@ def _fill_placeholders(s: str, page_no: int, total: int, date_s: str, fname: str
 def header_footer(doc: fitz.Document, left: str = "", center: str = "", right: str = "",
                   footer_left: str = "", footer_center: str = "", footer_right: str = "",
                   font_size: float = 10, margin_mm: float = 12, pages=None, start_number: int = 1,
-                  date_format: str = "%Y-%m-%d", color=(0, 0, 0), file_name: str | None = None) -> None:
-    """머리글·바닥글 여섯 자리. 자리표: {page} {total} {date} {file}. in place."""
+                  date_format: str = "%Y-%m-%d", color=(0, 0, 0), file_name: str | None = None,
+                  total: int | None = None) -> None:
+    """머리글·바닥글 여섯 자리. 자리표: {page} {total} {date} {file}. in place.
+
+    {total} 은 (적용할 쪽 수 + 첫 번호 - 1), 곧 마지막 쪽에 찍히는 번호다(알PDF 의 n). total 로 따로 줄 수 있다."""
     col = _color(color) or (0, 0, 0)
     date_s = _dt.datetime.now().strftime(date_format)
     fname = file_name if file_name is not None else _file_stem(doc)
     targets = _pages(doc, pages)
-    total = len(targets)
+    if total is None:
+        total = len(targets) + start_number - 1
     m = margin_mm * MM
     for k, pno in enumerate(targets):
         page = doc[pno]
@@ -443,21 +451,179 @@ def header_footer(doc: fitz.Document, left: str = "", center: str = "", right: s
 
 def bates_numbers(doc: fitz.Document, prefix: str = "", start: int = 1, digits: int = 6,
                   suffix: str = "", position: str = "footer_right", font_size: float = 10,
-                  pages=None, color=(0, 0, 0)) -> None:
-    """베이츠 번호(접두어 + 0 채운 번호 + 접미어). position: header_/footer_ + left/center/right. in place."""
+                  pages=None, color=(0, 0, 0), reverse: bool = False, margin_mm: float = 12) -> None:
+    """베이츠 번호(접두어 + 0 채운 번호 + 접미어). position: header_/footer_ + left/center/right. in place.
+
+    reverse: 마지막 쪽이 start 이고 앞으로 갈수록 커진다(알PDF 「베이츠 번호 거꾸로」)."""
     col = _color(color) or (0, 0, 0)
     pos = position.lower()
     vy, _, hx = pos.partition("_")
     hx = hx or "right"
-    m = 12 * MM
-    for k, pno in enumerate(_pages(doc, pages)):
+    m = margin_mm * MM
+    targets = _pages(doc, pages)
+    for k, pno in enumerate(targets):
         page = doc[pno]
         rect = page.rect
-        s = f"{prefix}{start + k:0{digits}d}{suffix}"
+        no = start + (len(targets) - 1 - k if reverse else k)
+        s = f"{prefix}{no:0{digits}d}{suffix}"
         w = _text_width(s, font_size)
         x = {"left": rect.x0 + m, "center": rect.x0 + (rect.width - w) / 2, "right": rect.x1 - m - w}.get(hx, rect.x1 - m - w)
         y = rect.y0 + m + font_size * 0.8 if vy == "header" else rect.y1 - m
         _write_text(page, (x, y), s, font_size, col)
+
+
+# 쪽 번호 모양(화면 이름, 머리글 자리표). 쪽 번호는 머리글/바닥글 한 칸에 번호만 든 것이다(알PDF 와 같은 뜻)
+PAGE_NUMBER_STYLES = [("1", "{page}"), ("1 / n", "{page} / {total}"), ("- 1 -", "- {page} -"),
+                      ("페이지 1", "페이지 {page}"), ("n 페이지 중 1", "{total} 페이지 중 {page}")]
+HF_SLOTS = ("left", "center", "right", "footer_left", "footer_center", "footer_right")  # header_footer 의 여섯 칸 이름
+
+
+def page_numbers(doc: fitz.Document, style: str = "{page}", position: str = "footer_center", start: int = 1,
+                 font_size: float = 11, margin_mm: float = 12.7, color=(0, 0, 0), pages=None,
+                 total: int | None = None) -> None:
+    """쪽 번호. style 은 PAGE_NUMBER_STYLES 의 자리표 글, position 은 HF_SLOTS 가운데 하나. in place."""
+    if position not in HF_SLOTS:
+        raise EngineError(f"쪽 번호 자리가 잘못됐습니다: {position}")
+    header_footer(doc, **{position: style}, font_size=font_size, margin_mm=margin_mm, pages=pages,
+                  start_number=start, color=color, total=total)
+
+
+# ── 꾸미기 표시: 넣은 것을 나중에 찾아 고치고 지운다 ─────────────────────
+# 꾸미기 하나를 쪽마다 폼 객체(XObject) 하나로 넣고, 그 객체에 /RPDFDeco(종류)·/RPDFSet(설정 JSON)을 단다.
+# 그냥 글·그림으로 그리면 본문과 섞여 다시 찾을 수 없었다(알PDF 의 추가·업데이트·삭제를 따라 함).
+DECO_KINDS = {"watermark": "워터마크", "background": "배경", "header_footer": "머리글 & 바닥글",
+              "page_number": "쪽 번호", "bates": "베이츠 번호"}
+
+
+def _deco_draw(kind: str, s: dict):
+    """종류·설정 → (그리는 함수(임시 쪽, 차례 k, 쪽 수 n), 모든 쪽이 같은 그림인지)."""
+    s = {k: v for k, v in s.items() if k != "pages"}
+    if kind == "watermark":
+        return (lambda d, i, k, n: watermark(d, pages=[i], **s)), True
+    if kind == "background":
+        return (lambda d, i, k, n: background(d, pages=[i], **s)), True
+    if kind == "header_footer":
+        st = int(s.pop("start_number", 1))
+        return (lambda d, i, k, n: header_footer(d, pages=[i], start_number=st + k, total=n + st - 1, **s)), False
+    if kind == "page_number":
+        st = int(s.pop("start", 1))
+        return (lambda d, i, k, n: page_numbers(d, pages=[i], start=st + k, total=n + st - 1, **s)), False
+    if kind == "bates":
+        st, rev = int(s.pop("start", 1)), bool(s.pop("reverse", False))
+        return (lambda d, i, k, n: bates_numbers(d, pages=[i], start=st + (n - 1 - k if rev else k), **s)), False
+    raise EngineError(f"모르는 꾸미기입니다: {kind}")
+
+
+def add_decoration(doc: fitz.Document, kind: str, pages=None, file_name: str | None = None, **settings) -> int:
+    """꾸미기를 넣는다(in place). 넣은 쪽 수. settings 는 종류마다 watermark·background·header_footer·page_numbers·
+    bates_numbers 의 인자 그대로이고, 문서 안에 같이 적어 두어 「업데이트」 때 대화상자에 다시 채운다."""
+    if kind == "header_footer":   # 파일 이름은 넣을 때의 이름으로 굳는다(임시 문서에는 이름이 없다)
+        settings["file_name"] = file_name if file_name is not None else _file_stem(doc)
+    draw, same = _deco_draw(kind, settings)
+    targets = _pages(doc, pages)
+    n = len(targets)
+    tmp = fitz.open()
+    try:
+        # 1) 임시 문서에 쪽마다 그린다. 쪽과 같은 크기·회전으로 그린 뒤 회전만 0 으로 되돌리면
+        #    그 쪽에 바로 그렸을 때와 같은 회전 전 좌표의 그림이 된다
+        src_of: list[int] = []
+        seen: dict[tuple, int] = {}
+        fonts: dict[str, int] = {}
+        for k, pno in enumerate(targets):
+            page = doc[pno]
+            cb = page.cropbox
+            key = (round(cb.width, 2), round(cb.height, 2), page.rotation)
+            if same and key in seen:
+                src_of.append(seen[key]); continue
+            t = tmp.new_page(width=cb.width, height=cb.height)
+            # 앞 쪽에 넣은 글꼴을 미리 걸어 둔다. 안 그러면 쪽마다 맑은 고딕을 새로 실어 300쪽에 10초 가까이 걸렸다
+            rt, rv = tmp.xref_get_key(t.xref, "Resources")
+            res = int(rv.split()[0]) if rt == "xref" else t.xref
+            for name, fx in fonts.items():
+                tmp.xref_set_key(res, f"Font/{name}" if rt == "xref" else f"Resources/Font/{name}", f"{fx} 0 R")
+            t.set_rotation(page.rotation)
+            draw(tmp, t.number, k, n)
+            t.set_rotation(0)
+            for f in t.get_fonts():
+                fonts.setdefault(f[4], f[0])
+            seen[key] = t.number; src_of.append(t.number)
+        # 2) 다 그린 뒤에 붙인다(붙이는 중에 임시 문서가 바뀌면 PyMuPDF 의 옮김 표가 어긋난다)
+        meta = fitz.get_pdf_str(json.dumps({k: v for k, v in settings.items()}, ensure_ascii=False))
+        for pno, src in zip(targets, src_of):
+            page = doc[pno]
+            rot = page.rotation
+            before = {x[1] for x in page.get_xobjects()}
+            page.set_rotation(0)   # 돌린 쪽에 그대로 붙이면 그림이 옆으로 눕는다
+            try:
+                page.show_pdf_page(page.rect, tmp, src, overlay=kind != "background", keep_proportion=False)
+            finally:
+                page.set_rotation(rot)
+            for x in page.get_xobjects():
+                if x[2] == 0 and x[1] not in before:
+                    doc.xref_set_key(x[0], "RPDFDeco", f"/{kind}")
+                    doc.xref_set_key(x[0], "RPDFSet", meta)
+    finally:
+        tmp.close()
+    return n
+
+
+def _deco_items(doc: fitz.Document, pno: int):
+    """쪽 pno 에 붙은 꾸미기: [(xref, 이름, 종류, 설정 JSON 글)]."""
+    out = []
+    for xref, name, ref, _bbox in doc[pno].get_xobjects():
+        if ref != 0:
+            continue
+        t, v = doc.xref_get_key(xref, "RPDFDeco")
+        if t == "name":
+            out.append((xref, name, v.lstrip("/"), doc.xref_get_key(xref, "RPDFSet")[1]))
+    return out
+
+
+def decorations(doc: fitz.Document, kind: str | None = None) -> list[dict]:
+    """문서 안의 꾸미기. 같은 설정끼리 묶어 [{"kind", "settings", "pages"}] (넣은 차례)."""
+    groups: dict[tuple, dict] = {}
+    for pno in range(doc.page_count):
+        for _x, _n, k, raw in _deco_items(doc, pno):
+            if kind and k != kind:
+                continue
+            g = groups.get((k, raw))
+            if g is None:
+                try:
+                    s = json.loads(raw)
+                except ValueError:
+                    s = {}
+                g = groups[(k, raw)] = {"kind": k, "settings": s, "pages": []}
+            if pno not in g["pages"]:
+                g["pages"].append(pno)
+    return list(groups.values())
+
+
+def remove_decorations(doc: fitz.Document, kind: str) -> int:
+    """kind 꾸미기를 모두 지운다(in place). 지운 수. 그린 내용 줄(「q /이름 Do Q」)과 쪽 자원의 이름을 같이 뺀다."""
+    gone = 0
+    for pno in range(doc.page_count):
+        items = [it for it in _deco_items(doc, pno) if it[2] == kind]
+        if not items:
+            continue
+        page = doc[pno]
+        names = [re.escape(name) for _x, name, _k, _r in items]
+        pat = re.compile(rb"q\s*/(?:" + "|".join(names).encode() + rb")\s+Do\s*Q")
+        for cx in page.get_contents():
+            data = doc.xref_stream(cx)
+            new = pat.sub(b"", data)
+            if new != data:
+                doc.update_stream(cx, new)
+        for _x, name, _k, _r in items:
+            doc.xref_set_key(page.xref, f"Resources/XObject/{name}", "null")
+            gone += 1
+    return gone
+
+
+def replace_decorations(doc: fitz.Document, kind: str, groups: Sequence[dict]) -> None:
+    """kind 꾸미기를 모두 지우고 groups([{"settings", "pages"}])로 다시 넣는다(업데이트). in place."""
+    remove_decorations(doc, kind)
+    for g in groups:
+        add_decoration(doc, kind, pages=g["pages"], **g["settings"])
 
 
 # ── 빈 쪽 삭제 · 기울기 보정 ────────────────────────────────────────────

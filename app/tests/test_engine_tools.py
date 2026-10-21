@@ -541,6 +541,36 @@ def test_compare_aligns_inserted_page():
     assert tools.match_pages(a, b) == [(0, 0), (None, 1), (1, 2), (2, 3)]
 
 
+def test_decorations_add_find_update_remove(doc, tmp_path):
+    doc[1].set_rotation(90)
+    tools.add_decoration(doc, "page_number", style="{page} / {total}", start=3)
+    tools.add_decoration(doc, "watermark", text="대외비")
+    tools.add_decoration(doc, "bates", prefix="A-", start=1, digits=4, reverse=True, pages=[0, 2])
+    assert "3 / 5" in doc[0].get_text() and "5 / 5" in doc[2].get_text()   # n = 쪽 수 + 첫 번호 - 1
+    assert "A-0002" in doc[0].get_text() and "A-0001" in doc[2].get_text()   # 거꾸로
+    # 돌린 쪽에서도 바닥글은 보이는 쪽 아래쪽에 선다
+    r = doc[1].search_for("4 / 5")[0] * doc[1].rotation_matrix  # search_for 는 회전 전 좌표
+    assert r.y0 > doc[1].rect.height * 0.8 and abs((r.x0 + r.x1) / 2 - doc[1].rect.width / 2) < 20
+    p = str(tmp_path / "d.pdf"); doc.save(p)
+    d = fitz.open(p)
+    got = {g["kind"]: g for g in tools.decorations(d)}
+    assert set(got) == {"page_number", "watermark", "bates"} and got["bates"]["pages"] == [0, 2]
+    assert got["page_number"]["settings"]["start"] == 3
+    g = got["page_number"]; g["settings"]["style"] = "- {page} -"
+    tools.replace_decorations(d, "page_number", [g])
+    assert "- 3 -" in d[0].get_text() and "3 / 5" not in d[0].get_text()
+    assert tools.remove_decorations(d, "watermark") == 3
+    assert "대외비" not in d[0].get_text() and "Hello" in d[0].get_text() and "A-0002" in d[0].get_text()
+    assert {g["kind"] for g in tools.decorations(d)} == {"bates", "page_number"}
+
+
+def test_background_under_body(doc):
+    tools.add_decoration(doc, "background", color=(0, 0, 1), pages=[0])
+    pix = doc[0].get_pixmap(dpi=20)
+    assert pix.pixel(5, 5) == (0, 0, 255)
+    assert "Hello" in doc[0].get_text()  # 본문은 그대로 위에
+
+
 def test_watermark_tile(doc):
     tools.watermark(doc, text="대외비", position="tile", pages=[0])
     assert doc[0].get_text().count("대외비") > 4
