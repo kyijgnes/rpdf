@@ -330,7 +330,16 @@ class Document:
                 # 열 때의 암호·권한을 그대로 둔다(그냥 저장하면 암호가 풀린다).
                 # garbage=3(같은 객체 합치기)은 스캔 376쪽에서 1.3초 걸리고 크기는 0.04% 줄 뿐이라, 다른 PDF 를 끼웠을 때만 쓴다.
                 # 평소엔 2(안 쓰는 것 지우고 번호 다시 매김): 1 과 빠르기는 같고 파일이 1.5% 작다
-                self.fitz.save(tmp, garbage=3 if self.dedupe else 2, deflate=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+                sec = getattr(self, "security", None)
+                if sec is None:
+                    self.fitz.save(tmp, garbage=3 if self.dedupe else 2, deflate=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+                else:
+                    # 「암호화」 로 걸어 둔 새 암호(빈 dict 면 암호 빼기)를 이 저장에서 건다. 열린 문서에 바로 걸면
+                    # 그 뒤 새로 넣은 칸·주석이 저장 때 깨져서(MuPDF aes padding) 저장할 때까지 미룬다
+                    from .tools import encrypt_bytes
+                    data, pw = encrypt_bytes(self.fitz, **sec) if sec else (plain_bytes(self.fitz, garbage=3, deflate=True), None)
+                    with open(tmp, "wb") as f:
+                        f.write(data)
                 # 저장 뒤에도 계속 편집할 수 있게 다시 연다
                 with open(tmp, "rb") as f:
                     data = f.read()
@@ -339,10 +348,13 @@ class Document:
                 if os.path.exists(tmp):
                     os.remove(tmp)
             self.fitz.close()
+            if sec is not None:
+                self.password = pw   # 다시 열 때와 되돌리기에 새 암호를 쓴다
             self.fitz = self._load(data)
             self.path = target
             self.modified = False
             self.dedupe = False
+            self.security = None
 
     def to_bytes(self) -> bytes:
         with self.lock:

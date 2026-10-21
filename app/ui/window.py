@@ -1442,18 +1442,19 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "일괄 작업", msg); self._offer_open(job["out_dir"])
 
     def encrypt(self, t: DocTab):
-        dlg = D.EncryptDialog(self)
+        T = _engine("tools")
+        dlg = D.EncryptDialog(self, T.encryption_method(t.doc.fitz))
         if not dlg.exec():
             return
         vals = dlg.values()
-        if vals is None:
+        if not dlg.to_new_file():
+            # 알PDF 처럼 열린 문서에 걸어 두고 다음 저장 때 파일에 건다(Document.save 가 security 를 본다)
+            t.doc.security = vals; t.doc.modified = True; t.changed(None)
+            self.say(f"저장하면 암호가 걸립니다 · {dict(D.EncryptDialog.METHODS)[vals['method']].split(' · ')[0]}")
             return
-        if not vals["user_pw"] and not vals["owner_pw"]:
-            QMessageBox.warning(self, "암호화", "암호를 넣어 주세요"); return
         out, _ = QFileDialog.getSaveFileName(self, "암호 건 PDF 저장", self._suggest(t, "_암호.pdf"), PDF_FILTER)
         if not out:
             return
-        T = _engine("tools")
         T.encrypt(t.doc.fitz, out, **vals)
         self.say(f"암호를 걸어 저장했습니다: {out}")
 
@@ -1461,6 +1462,15 @@ class MainWindow(QMainWindow):
         # 권한 암호만 걸린 문서는 is_encrypted 가 False 다. 암호화 정보로 본다.
         if not (t.doc.fitz.metadata or {}).get("encryption") and not t.doc.password:
             self.say("이 문서에는 암호가 없습니다"); return
+        box = QMessageBox(QMessageBox.Icon.Question, "암호 풀기", "이 문서의 암호를 뺍니다.", parent=self)
+        here = box.addButton("이 문서에서 빼기 · 저장할 때 적용", QMessageBox.ButtonRole.AcceptRole)
+        new = box.addButton("암호 뺀 사본을 새 파일로", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is here:
+            t.doc.security = {}; t.doc.modified = True; t.changed(None); self.say("저장하면 암호가 빠집니다"); return
+        if box.clickedButton() is not new:
+            return
         out, _ = QFileDialog.getSaveFileName(self, "암호 푼 PDF 저장", self._suggest(t, "_암호해제.pdf"), PDF_FILTER)
         if out:
             c = t.doc.copy()  # 열린 문서를 encryption 없이 저장하면 그 뒤 저장이 깨진다. 사본에서 푼다

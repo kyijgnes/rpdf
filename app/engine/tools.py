@@ -811,11 +811,40 @@ def set_page_labels(doc: fitz.Document, start_page: int = 0, style: str = "D",
 
 
 # ── 보안 ────────────────────────────────────────────────────────────────
+# 암호화 방식(알PDF 와 같은 셋, 기본 128 bit AES)
+ENCRYPT_METHODS = {"aes128": fitz.PDF_ENCRYPT_AES_128, "aes256": fitz.PDF_ENCRYPT_AES_256, "rc4": fitz.PDF_ENCRYPT_RC4_128}
+
+
+def encryption_method(doc: fitz.Document) -> str | None:
+    """지금 문서의 암호화 방식(ENCRYPT_METHODS 열쇠). 암호가 없으면 None."""
+    s = ((doc.metadata or {}).get("encryption") or "").upper()
+    if not s:
+        return None
+    if "AES" in s:
+        return "aes256" if "256" in s else "aes128"
+    return "rc4"
+
+
 def encrypt(doc: fitz.Document, out_path: str, user_pw: str = "", owner_pw: str = "",
             allow_print: bool = True, allow_copy: bool = True, allow_modify: bool = True,
             allow_annotate: bool = True, allow_forms: bool = True, allow_accessibility: bool = True,
-            allow_assemble: bool = True, allow_print_hq: bool = True) -> str:
-    """AES-256 으로 암호를 걸어 저장."""
+            allow_assemble: bool = True, allow_print_hq: bool = True, method: str = "aes128") -> str:
+    """암호를 걸어 out_path 에 저장. method: aes128(기본) · aes256 · rc4."""
+    with open(out_path, "wb") as f:
+        f.write(encrypt_bytes(doc, user_pw, owner_pw, method, allow_print=allow_print, allow_copy=allow_copy,
+                              allow_modify=allow_modify, allow_annotate=allow_annotate, allow_forms=allow_forms,
+                              allow_accessibility=allow_accessibility, allow_assemble=allow_assemble,
+                              allow_print_hq=allow_print_hq)[0])
+    return out_path
+
+
+def encrypt_bytes(doc: fitz.Document, user_pw: str = "", owner_pw: str = "", method: str = "aes128",
+                  allow_print: bool = True, allow_copy: bool = True, allow_modify: bool = True,
+                  allow_annotate: bool = True, allow_forms: bool = True, allow_accessibility: bool = True,
+                  allow_assemble: bool = True, allow_print_hq: bool = True) -> tuple[bytes, str]:
+    """암호를 건 PDF 바이트와 다시 열 때 쓸 권한 암호. 열린 문서에 걸 때는 Document.security 에 이 인자를 넣어 두면
+    다음 저장에서 이것으로 쓴다(알PDF 「암호화」 와 같은 흐름. 창을 닫는 순간 파일이 바뀌지 않음)."""
+    check_encrypt_args(user_pw, owner_pw, method)
     perm = 0
     for flag, allowed in (
         (fitz.PDF_PERM_PRINT, allow_print), (fitz.PDF_PERM_COPY, allow_copy),
@@ -825,19 +854,37 @@ def encrypt(doc: fitz.Document, out_path: str, user_pw: str = "", owner_pw: str 
     ):
         if allowed:
             perm |= flag
-    if not user_pw and not owner_pw:
-        raise EngineError("사용자 암호나 소유자 암호 가운데 하나는 넣어야 합니다")
     # 권한 암호를 비우면 전에는 열기 암호가 권한 암호로도 쓰여, 열기 암호로 열면 인쇄·복사 막기가 무의미했다
     import secrets
     from .document import plain_bytes
+    owner = owner_pw or secrets.token_urlsafe(18)
     work = fitz.open("pdf", plain_bytes(doc))  # 열린 문서의 글꼴을 줄이면 이어서 넣는 글자가 빠진다. 사본에서.
     try:
         _subset(work)
-        work.save(out_path, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw=owner_pw or secrets.token_urlsafe(18),
-                  user_pw=user_pw, permissions=perm, garbage=3, deflate=True)
+        data = work.tobytes(encryption=ENCRYPT_METHODS[method], owner_pw=owner, user_pw=user_pw,
+                            permissions=perm, garbage=3, deflate=True)
     finally:
         work.close()
-    return out_path
+    chk = fitz.open("pdf", data)   # 암호가 정말 걸렸는지 다시 열어 본다(안 걸린 채 「암호화」 로 넘어가지 않게)
+    try:
+        if not (chk.metadata or {}).get("encryption") and not chk.needs_pass:
+            raise EngineError("암호를 걸지 못했습니다(암호에 쓸 수 없는 글자가 있는지 보세요)")
+    finally:
+        chk.close()
+    return data, owner
+
+
+def check_encrypt_args(user_pw: str = "", owner_pw: str = "", method: str = "aes128") -> None:
+    """암호를 걸기 전에 확인(창을 닫기 전에 부른다). 틀리면 EngineError."""
+    if method not in ENCRYPT_METHODS:
+        raise EngineError(f"암호화 방식이 잘못됐습니다: {method}")
+    if not user_pw and not owner_pw:
+        raise EngineError("열기 암호나 권한 암호 가운데 하나는 넣어야 합니다")
+    if user_pw and owner_pw and user_pw == owner_pw:
+        raise EngineError("열기 암호와 권한 암호는 달라야 합니다(같으면 열기 암호로 권한 제한이 풀립니다)")
+    # 128 bit 방식(AES·RC4)은 암호를 영문 글자로만 다룬다. 한글 암호를 넣으면 MuPDF 가 말없이 암호 없는 파일을 만든다
+    if method != "aes256" and not (user_pw + owner_pw).isascii():
+        raise EngineError("128 bit 방식은 영문·숫자·기호 암호만 됩니다. 한글 암호를 쓰려면 256 bit AES 를 고르세요")
 
 
 def is_encrypted(path: str) -> bool:

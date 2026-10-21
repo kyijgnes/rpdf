@@ -610,6 +610,42 @@ def test_encrypted_doc_survives_exports(tmp_path):
         assert g.needs_pass and g.authenticate(pw) and "Hello" in g[0].get_text()
 
 
+@pytest.mark.parametrize("method,word", [("aes128", "AES"), ("aes256", "AES"), ("rc4", "RC4")])
+def test_encrypt_methods(doc, tmp_path, method, word):
+    out = tools.encrypt(doc, str(tmp_path / "e.pdf"), user_pw="u", owner_pw="o", method=method, allow_copy=False)
+    e = fitz.open(out)
+    assert e.needs_pass and e.authenticate("u")
+    assert word in e.metadata["encryption"] and tools.encryption_method(e) == method
+    assert not e.permissions & fitz.PDF_PERM_COPY
+    with pytest.raises(EngineError):
+        tools.encrypt(doc, str(tmp_path / "x.pdf"), user_pw="같음", owner_pw="같음")
+
+
+def test_encrypt_current_doc_applies_on_save(tmp_path):
+    """지금 문서에 건 암호는 열린 문서를 그대로 고칠 수 있고, 저장할 때 파일에 걸린다."""
+    from app.engine import annots as A
+    from app.engine.document import Document
+    src = str(tmp_path / "plain.pdf"); make_doc().save(src)
+    d = Document(src)
+    with pytest.raises(EngineError):   # 128 bit 방식에 한글 암호: 말없이 암호 없는 파일이 되던 것을 막는다
+        tools.encrypt_bytes(d.fitz, user_pw="열기", owner_pw="o", method="aes128")
+    d.security = {"user_pw": "열기", "owner_pw": "권한", "method": "aes256"}
+    A.add_field(d, 0, fitz.Rect(50, 500, 200, 520), "text", value="암호 건 뒤 넣은 칸")
+    assert not fitz.open("pdf", open(src, "rb").read()).needs_pass            # 아직 파일은 그대로
+    d.save(src)
+    g = fitz.open("pdf", open(src, "rb").read())
+    assert g.needs_pass and g.authenticate("열기") and tools.encryption_method(g) == "aes256"
+    assert [w.field_value for w in g[0].widgets()] == ["암호 건 뒤 넣은 칸"] and "Hello" in g[0].get_text()
+    # 저장 뒤에도 계속 고치고 다시 저장할 수 있다(같은 암호 유지)
+    A.add_field(d, 0, fitz.Rect(50, 540, 200, 560), "text", value="둘째")
+    d.save(src)
+    g = fitz.open("pdf", open(src, "rb").read())
+    assert g.authenticate("권한") and [w.field_value for w in g[0].widgets()] == ["암호 건 뒤 넣은 칸", "둘째"]
+    d.security = {}   # 암호 빼기도 저장 때
+    d.save(src)
+    assert not fitz.open("pdf", open(src, "rb").read()).needs_pass
+
+
 def test_compare_aligns_inserted_page():
     a = make_doc(["A 하나 one", "B 둘 two", "C 셋 three"])
     b = make_doc(["A 하나 one", "새 쪽 new page", "B 둘 two", "C 셋 three"])

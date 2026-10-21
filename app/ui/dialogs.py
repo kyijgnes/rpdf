@@ -649,7 +649,9 @@ class BatesDialog(DecoDialog):
 
 # ── 보안 ───────────────────────────────────────────────────────
 class EncryptDialog(FormDialog):
-    def __init__(self, parent):
+    METHODS = [("aes128", "128 bit AES"), ("aes256", "256 bit AES · 한글 암호 가능"), ("rc4", "128 bit RC4 · 옛 프로그램용")]
+
+    def __init__(self, parent, method: str | None = None):
         super().__init__("암호화", parent, "적용")
         self.open_pw = self.add("열기 암호", QLineEdit()); self.open_pw.setEchoMode(QLineEdit.EchoMode.Password)
         self.open_pw2 = self.add("열기 암호 확인", QLineEdit()); self.open_pw2.setEchoMode(QLineEdit.EchoMode.Password)
@@ -661,14 +663,39 @@ class EncryptDialog(FormDialog):
                                           ("allow_assemble", "쪽 구성"), ("allow_accessibility", "접근성 읽기"))):
             cb = QCheckBox(label); cb.setChecked(True); self.perms[key] = cb; gl.addWidget(cb, n // 2, n % 2)
         self.form.addRow(g)
+        box = QWidget(); vl = QVBoxLayout(box); vl.setContentsMargins(0, 0, 0, 0)
+        self.methods = {}
+        for key, label in self.METHODS:   # 알PDF 와 같이 128 bit AES 가 기본, 이미 걸린 문서는 그 방식
+            rb = QRadioButton(label); self.methods[key] = rb; vl.addWidget(rb)
+        self.methods.get(method or "aes128", self.methods["aes128"]).setChecked(True)
+        self.add("방식", box)
+        box2 = QWidget(); vl2 = QVBoxLayout(box2); vl2.setContentsMargins(0, 0, 0, 0)
+        self.here = QRadioButton("이 문서에 걸기 · 저장할 때 적용"); self.here.setChecked(True)
+        self.new_file = QRadioButton("암호 건 사본을 새 파일로 저장")
+        vl2.addWidget(self.here); vl2.addWidget(self.new_file)
+        self.add("적용", box2)
+
+    def accept(self):
+        if self.open_pw.text() != self.open_pw2.text():
+            QMessageBox.warning(self, "암호화", "열기 암호 두 칸이 다릅니다"); return
+        from ..engine.tools import EngineError, check_encrypt_args
+        try:   # 창을 닫기 전에 확인한다(같은 암호·한글 암호 등)
+            check_encrypt_args(self.open_pw.text(), self.owner_pw.text(), self._method())
+        except EngineError as e:
+            QMessageBox.warning(self, "암호화", str(e)); return
+        super().accept()
+
+    def _method(self) -> str:
+        return next(k for k, rb in self.methods.items() if rb.isChecked())
 
     def values(self) -> dict | None:
-        if self.open_pw.text() != self.open_pw2.text():
-            QMessageBox.warning(self, "암호화", "열기 암호 두 칸이 다릅니다"); return None
         # 권한 암호를 비우면 엔진이 무작위로 만든다(열기 암호를 권한 암호로 쓰면 인쇄·복사 막기가 무의미했다)
-        d = {"user_pw": self.open_pw.text(), "owner_pw": self.owner_pw.text()}
+        d = {"user_pw": self.open_pw.text(), "owner_pw": self.owner_pw.text(), "method": self._method()}
         d.update({k: cb.isChecked() for k, cb in self.perms.items()})
         return d
+
+    def to_new_file(self) -> bool:
+        return self.new_file.isChecked()
 
 
 class RedactSearchDialog(FormDialog):
