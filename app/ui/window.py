@@ -116,7 +116,7 @@ class DocTab(QWidget):
         for p in self.panels.values():
             self.side.addWidget(p)
         self.side.hide()
-        self.props = PropsPanel(self.viewer.props)
+        self.props = PropsPanel(self.viewer.props, self.viewer)
         self.props.hide()
         self.warn = QLabel(""); self.warn.setObjectName("warn"); self.warn.hide()
         root = QVBoxLayout(self); root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
@@ -199,8 +199,9 @@ class DocTab(QWidget):
     def apply_props(self, d: dict):
         s = self.viewer.sel
         if s and s.kind == "annot":
-            A.update(self.doc, s.page, s.xref, stroke=d["stroke"], fill=d["fill"], width=d["width"], opacity=d["opacity"],
-                     content=d["content"])
+            new = A.update(self.doc, s.page, s.xref, **d)  # 속성 패널이 그 종류에 맞는 인자만 준다
+            if new:
+                s.xref = new
             self.changed([s.page])
 
     def close(self):
@@ -1034,6 +1035,7 @@ class MainWindow(QMainWindow):
                     A.free_text(d, data["page"], data["rect"], vals["text"], vals["fontsize"], vals["text_color"], vals["fill"],
                                 vals["border"], vals["width"], v.props["opacity"], callout=callout, author=v.props["author"],
                                 typewriter=(data["kind"] == "typewriter"))
+                    t.props.remember(data["kind"], {k: vals[k] for k in ("fontsize", "text_color", "fill", "border", "width")})
                     t.changed([data["page"]])
             self.on_tool("select")
         elif kind == "addtext":
@@ -1089,7 +1091,8 @@ class MainWindow(QMainWindow):
         elif kind == "caret":
             text, ok = QInputDialog.getText(self, "삽입 기호", "끼워 넣을 글자(메모)")
             if ok:
-                A.caret(d, data["page"], data["point"], text, v.props["author"]); t.changed([data["page"]])
+                A.caret(d, data["page"], data["point"], text, v.props["author"], v.props.get("caret_color", (0.5, 0, 0.5)),
+                        v.props["opacity"]); t.changed([data["page"]])
         elif kind == "attach":
             p, _ = QFileDialog.getOpenFileName(self, "첨부할 파일")
             if p:
@@ -1564,23 +1567,40 @@ class MainWindow(QMainWindow):
         t = self.cur()
         if not t:
             return
+        from ..engine import annot_xfdf as X
         if key == "export":
-            out, _ = QFileDialog.getSaveFileName(self, "주석 내보내기", self._suggest(t, "_주석.json"), "JSON (*.json)")
+            out, flt = QFileDialog.getSaveFileName(self, "주석 내보내기", self._suggest(t, ".xfdf"),
+                                                   "XFDF (*.xfdf);;FDF (*.fdf);;RPDF JSON (*.json)")
             if not out: return
-            data = A.export_annots(t.doc)
-            with open(out, "w", encoding="utf-8") as fp:
-                json.dump(data, fp, ensure_ascii=False, indent=1)
-            self.say(f"주석 {len(data)}개를 내보냈습니다")
+            ext = os.path.splitext(out)[1].lower() or {"F": ".fdf", "R": ".json"}.get(flt[:1], ".xfdf")
+            skipped = 0
+            if ext == ".json":
+                data = A.export_annots(t.doc); n = len(data)
+                with open(out, "w", encoding="utf-8") as fp:
+                    json.dump(data, fp, ensure_ascii=False, indent=1)
+            else:
+                raw, n, skipped = (X.to_fdf if ext == ".fdf" else X.to_xfdf)(t.doc, os.path.basename(t.doc.path or ""))
+                with open(out, "wb") as fp:
+                    fp.write(raw)
+            self.say(f"주석 {n}개를 내보냈습니다" + (f" · 첨부 파일 등 못 담은 것 {skipped}개" if skipped else ""))
         else:
-            p, _ = QFileDialog.getOpenFileName(self, "주석 가져오기", "", "JSON (*.json)")
+            p, _ = QFileDialog.getOpenFileName(self, "주석 가져오기", os.path.dirname(t.doc.path or ""),
+                                               "주석 파일 (*.xfdf *.fdf *.json);;모든 파일 (*)")
             if not p: return
             try:
-                with open(p, encoding="utf-8") as fp:
-                    data = json.load(fp)
-                if not isinstance(data, list): raise ValueError("주석 목록이 아님")
-            except (OSError, ValueError) as e:
+                with open(p, "rb") as fp:
+                    raw = fp.read()
+                head = raw.lstrip()[:16]
+                if head.startswith(b"%FDF"):
+                    n, skipped = X.import_fdf(t.doc, raw)
+                elif head.startswith(b"<"):
+                    n, skipped = X.import_xfdf(t.doc, raw)
+                else:
+                    data = json.loads(raw.decode("utf-8-sig"))
+                    if not isinstance(data, list): raise ValueError("주석 목록이 아님")
+                    n, skipped = A.import_annots(t.doc, data)
+            except Exception as e:  # noqa: BLE001
                 QMessageBox.warning(self, "주석 가져오기", f"읽을 수 없는 파일입니다 ({e})"); return
-            n, skipped = A.import_annots(t.doc, data)
             t.changed(None); self.say(f"주석 {n}개를 가져왔습니다" + (f" · 못 가져온 것 {skipped}개" if skipped else ""))
 
     # ── 인쇄·메일·속성·설정·도움말 ──────────────────────────────

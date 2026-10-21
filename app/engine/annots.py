@@ -109,8 +109,8 @@ def _freetext_style(doc: Document, a: fitz.Annot) -> tuple[float, Color]:
     c = re.search(r"([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg", da)
     size = float(m.group(1)) if m else 11.0
     color = tuple(float(x) for x in c.groups()) if c else (0.0, 0.0, 0.0)
-    # 리치텍스트로 만든 글상자는 set_info 가 /RC 를 지워도 /DS 와 모양(AP)은 /DS 대로 남는다
-    if f.xref_get_key(a.xref, "RC")[0] != "null" or f.xref_get_key(a.xref, "DS")[0] != "null":
+    # 리치텍스트 글상자는 /DS(CSS) 대로 그린다
+    if _is_rich(f, a):
         ds = f.xref_get_key(a.xref, "DS")[1] or ""
         m = re.search(r"font-size\s*:\s*([\d.]+)\s*pt", ds) or re.search(r"font\s*:[^;]*?([\d.]+)\s*pt", ds)
         if m:
@@ -121,10 +121,55 @@ def _freetext_style(doc: Document, a: fitz.Annot) -> tuple[float, Color]:
     return size, color
 
 
+def _is_rich(f: fitz.Document, a: fitz.Annot) -> bool:
+    return f.xref_get_key(a.xref, "RC")[0] != "null" or f.xref_get_key(a.xref, "DS")[0] != "null"
+
+
+def _freetext_border(a: fitz.Annot) -> Color | None:
+    """글상자 테두리 색: 모양(AP) 첫 RG. MuPDF 는 테두리를 글자색으로 그리므로 우리가 고쳐 둔 색이 거기 있다."""
+    if not ((a.border or {}).get("width") or 0):
+        return None
+    try:
+        m = re.search(rb"([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+RG", a._getAP())
+    except Exception:  # noqa: BLE001
+        m = None
+    return tuple(float(x) for x in m.groups()) if m else None
+
+
+def _rc_xml(text: str) -> str:
+    """글상자 리치텍스트(/RC). 줄마다 문단 하나."""
+    esc = lambda s: s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")  # noqa: E731
+    paras = "".join(f"<p>{esc(line)}</p>" for line in (text.split("\n") or [""]))
+    return ('<?xml version="1.0"?><body xmlns="http://www.w3.org/1999/xhtml" '
+            'xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/" xfa:APIVersion="Acrobat:8.0.0" '
+            f'xfa:spec="2.4">{paras}</body>')
+
+
+def _ds_css(fontsize: float, color: Color) -> str:
+    hexc = "".join(f"{round(max(0, min(1, c)) * 255):02x}" for c in color)
+    return f"font-family: Malgun Gothic, sans-serif; font-size: {fontsize:g}pt; color: #{hexc};"
+
+
+def _ft_redraw(f: fitz.Document, a: fitz.Annot, text: str, fontsize: float, text_color: Color,
+               fill: Color | None, border: Color | None, rich: bool, **kw) -> None:
+    """글상자 모양을 다시 그린다. 리치텍스트면 /RC·/DS 를 먼저 쓰고(set_info 가 /RC 를 지운다),
+    그린 뒤 테두리 색을 고친다(MuPDF 는 테두리를 글자색으로 그린다)."""
+    if rich:
+        f.xref_set_key(a.xref, "DS", fitz.get_pdf_str(_ds_css(fontsize, text_color)))
+        f.xref_set_key(a.xref, "RC", fitz.get_pdf_str(_rc_xml(text)))
+    a.update(fontsize=fontsize, text_color=text_color, fill_color=fill, **kw)
+    if rich and border is not None and tuple(border) != tuple(text_color):
+        r, g, b = border
+        ap = re.sub(rb"[\d.]+\s+[\d.]+\s+[\d.]+\s+RG", f"{r:g} {g:g} {b:g} RG".encode(), a._getAP(), count=1)
+        a._setAP(ap)
+
+
 def annot_colors(doc: Document, a: fitz.Annot) -> dict:
-    """화면에 보일 색: stroke=선·글자 색, fill=채움색. 글상자는 PyMuPDF 가 채움색을 stroke 로 돌려주므로 바로잡는다."""
+    """화면에 보일 색: stroke=선·글자 색, fill=채움색, border=글상자 테두리 색.
+    글상자는 PyMuPDF 가 채움색을 stroke 로 돌려주므로 바로잡는다."""
     if a.type[1] == "FreeText":
-        return {"stroke": _freetext_style(doc, a)[1], "fill": a.colors.get("stroke") or a.colors.get("fill")}
+        return {"stroke": _freetext_style(doc, a)[1], "fill": a.colors.get("stroke") or a.colors.get("fill"),
+                "border": _freetext_border(a)}
     return a.colors
 
 
@@ -158,8 +203,11 @@ def _recreate_moved(p: fitz.Page, a: fitz.Annot, dx: float, dy: float) -> int:
 def update(doc: Document, page: int, xref: int, *, stroke: Color | None = None, fill: Color | None = None,
            width: float | None = None, opacity: float | None = None, content: str | None = None,
            author: str | None = None, rect: fitz.Rect | None = None, fontsize: float | None = None,
-           text_color: Color | None = None) -> int | None:
-    """주석을 고친다. 꼭짓점 주석을 옮기면 새로 만들어지므로 (새) xref 를 돌려준다."""
+           text_color: Color | None = None, border: Color | None = None,
+           dashes: Sequence[float] | None = None, subject: str | None = None) -> int | None:
+    """주석을 고친다. 꼭짓점 주석을 옮기면 새로 만들어지므로 (새) xref 를 돌려준다.
+
+    글상자: stroke(또는 text_color)=글자색, border=테두리 색, fill=바탕색. dashes=() 는 실선."""
     doc.snapshot()
     with doc.lock:
         a = get(doc, page, xref)
@@ -175,23 +223,35 @@ def update(doc: Document, page: int, xref: int, *, stroke: Color | None = None, 
                 bw = ((a.border or {}).get("width") or 0) / 2
                 rect = fitz.Rect(rect.x0 + bw, rect.y0 + bw, rect.x1 - bw, rect.y1 - bw)
             a.set_rect(rect)
+        f = doc.fitz
+        if kind == "FreeText":
+            # 고치기 전 값(set_info 가 /RC 를 지우고, 다시 그리면 테두리가 글자색이 되므로 먼저 읽어 둔다)
+            fs0, tc0 = _freetext_style(doc, a)
+            bc0 = _freetext_border(a)
+            rich0 = _is_rich(f, a)
         if kind != "FreeText" and (stroke is not None or fill is not None):
-            a.set_colors(stroke=stroke, fill=fill)
-        if width is not None and kind != "FreeText":
+            a.set_colors(stroke=stroke, fill=[] if fill == () else fill)  # () = 채움 없애기(None 은 그대로 둠)
+        if width is not None and kind not in ("Caret", "Text", "FileAttachment") + MARKUP_KINDS:
             a.set_border(width=width)
+        if dashes is not None and kind not in ("FreeText", "Caret", "Text", "FileAttachment") + MARKUP_KINDS:
+            w = (a.border or {}).get("width", 1)
+            a.set_border({"width": w, "dashes": list(dashes), "style": "D"} if dashes else {"width": w, "dashes": [], "style": "S"})
         if opacity is not None:
             a.set_opacity(opacity)
         if content is not None:
             a.set_info(content=content)
         if author is not None:
             a.set_info(title=author)
+        if subject is not None:
+            a.set_info(subject=subject)
         if kind == "FreeText":
-            # 글상자는 set_colors 를 못 쓴다. 안 준 값은 지금 값을 그대로 쓴다(안 그러면 크기 11·검정으로 돌아감).
-            fs0, tc0 = _freetext_style(doc, a)
-            kw = {"fontsize": fontsize or fs0, "text_color": text_color or stroke or tc0}
-            if fill is not None:
-                kw["fill_color"] = fill
-            a.update(**kw)
+            # 글상자는 set_colors 를 못 쓴다. 안 준 값은 지금 값을 그대로 쓴다(안 그러면 크기 12·검정으로 돌아감).
+            tc = tuple(text_color or stroke or tc0)
+            # 보통 글상자는 테두리가 글자색을 따라간다(글자색만 바꿨는데 리치로 바뀌어 옛 테두리 색이 남지 않게)
+            bc = tuple(border) if border is not None else bc0 if rich0 or bc0 is None else tc
+            rich = rich0 or (bc is not None and bc != tc)
+            text = content if content is not None else a.info.get("content", "")
+            _ft_redraw(f, a, text, fontsize or fs0, tc, None if fill == () else fill, bc, rich)
         else:
             a.update()
         return a.xref
@@ -244,12 +304,14 @@ def area_highlight(doc: Document, page: int, rect: fitz.Rect, color: Color = (1,
         return a.xref
 
 
-def caret(doc: Document, page: int, point: fitz.Point, content: str = "", author: str = "") -> int:
+def caret(doc: Document, page: int, point: fitz.Point, content: str = "", author: str = "",
+          color: Color = (0.5, 0, 0.5), opacity: float = 1.0) -> int:
     doc.snapshot()
     with doc.lock:
-        r = fitz.Rect(point.x - 6, point.y - 10, point.x + 6, point.y + 2)
-        a = doc.fitz[page].add_caret_annot(r)
-        _finish(a, stroke=(0, 0, 1), content=content, author=author)
+        # add_caret_annot 은 점을 받는다. 네모를 넘기면 자리 값이 깨진(-2147483648) 주석이 생긴다
+        a = doc.fitz[page].add_caret_annot(fitz.Point(point))
+        a.set_rect(fitz.Rect(point.x - 6, point.y - 10, point.x + 6, point.y + 2))  # 꼭짓점이 누른 자리 위
+        _finish(a, stroke=color, opacity=opacity, content=content, author=author)
         return a.xref
 
 
@@ -382,18 +444,19 @@ def _add_free_text(p: fitz.Page, r: fitz.Rect, text: str, fontsize: float, text_
     kw = {"rotate": rotate}
     if callout:
         kw["callout"] = tuple(fitz.Point(q) for q in callout)
-    rich = border is not None and tuple(border) != tuple(text_color)
+    text_color = tuple(text_color)
+    rich = border is not None and tuple(border) != text_color
     if rich:
         a = p.add_freetext_annot(r, text, fontsize=fontsize, text_color=text_color, fill_color=fill,
                                  border_color=border, border_width=width, opacity=opacity, richtext=True,
-                                 style=f"font-family: Malgun Gothic, sans-serif; font-size: {fontsize}pt;", **kw)
+                                 style=_ds_css(fontsize, text_color), **kw)
     else:
         a = p.add_freetext_annot(r, text, fontsize=fontsize, fontname="malgun", text_color=text_color,
                                  fill_color=fill, border_width=width if border is not None else 0,
                                  opacity=opacity, **kw)
     # 리치텍스트 글상자는 /Contents 가 비어 주석 목록·내보내기·속성 창에 내용이 안 나온다
     a.set_info(content=text, title=author or None)
-    a.update()
+    _ft_redraw(p.parent, a, text, fontsize, text_color, fill, tuple(border) if border is not None else None, rich)
     return a
 
 
@@ -499,11 +562,12 @@ def _import_one(doc: Document, e: dict) -> bool:
         width = b.get("width") or 0
         box = _inner(r, rd)
         box = fitz.Rect(box.x0 + width / 2, box.y0 + width / 2, box.x1 - width / 2, box.y1 - width / 2)  # MuPDF 가 테두리 반만큼 넓혀 둔 것
-        # 테두리는 글자색으로(PyMuPDF 리치텍스트 글상자는 테두리 색을 안 그려 원래도 그렇게 보였다)
-        a = _add_free_text(p, box, info.get("content", ""), fs, tuple(tc), fill, tuple(tc) if width else None,
+        # 테두리 색이 없는 옛 파일은 글자색으로(그때는 테두리를 글자색으로 그렸다)
+        bc = tuple(cols.get("border") or tc) if width else None
+        a = _add_free_text(p, box, info.get("content", ""), fs, tuple(tc), fill, bc,
                            width, op, e.get("callout"), e.get("rotate", 0), info.get("title", ""))
-        a.set_info(subject=info.get("subject", ""))
-        a.update()
+        if info.get("subject"):  # 다시 그리면 고쳐 둔 테두리 색이 풀리므로 열쇠만 쓴다
+            doc.fitz.xref_set_key(a.xref, "Subj", fitz.get_pdf_str(info["subject"]))
         return True
     if kind in MARKUP_KINDS:
         fn = {"Highlight": p.add_highlight_annot, "Underline": p.add_underline_annot,
