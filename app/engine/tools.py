@@ -151,12 +151,12 @@ def _text_width(text: str, fontsize: float) -> float:
 
 
 # ── 압축 ────────────────────────────────────────────────────────────────
-# 알PDF 단계값(높음 72dpi·45 / 중간 120dpi·70 / 낮음 150dpi·85). 목표 해상도보다 1/4 넘게 고운 그림만 줄인다
-# (조금 넘는 것까지 다시 담으면 화질만 깎이고 크기는 거의 그대로다)
+# 알PDF 단계값(높음 72dpi·45 / 중간 120dpi·70 / 낮음 150dpi·85). 목표 해상도보다 10% 넘게 고운 그림만 줄인다
+# (조금 넘는 것까지 다시 줄이면 화질만 깎인다. 문턱을 1/4 위로 두었더니 흔한 150dpi 스캔이 중간에서 안 줄었다)
 _LEVELS = {
-    "high": dict(dpi_threshold=90, dpi_target=72, quality=45),
-    "medium": dict(dpi_threshold=150, dpi_target=120, quality=70),
-    "low": dict(dpi_threshold=188, dpi_target=150, quality=85),
+    "high": dict(dpi_threshold=80, dpi_target=72, quality=45),
+    "medium": dict(dpi_threshold=132, dpi_target=120, quality=70),
+    "low": dict(dpi_threshold=165, dpi_target=150, quality=85),
 }
 COMPRESS_LEVELS = ("high", "medium", "low")   # 화면 차례(기본은 첫째 「높음」)
 
@@ -195,8 +195,7 @@ def compress(doc: fitz.Document, out_path: str, level: str = "high",
         _say(progress, 0, 2, "그림 다시 담는 중")
         if hasattr(work, "rewrite_images"):
             try:
-                work.rewrite_images(dpi_threshold=opt["dpi_threshold"], dpi_target=opt["dpi_target"],
-                                    quality=opt["quality"], lossy=True, lossless=True, bitonal=True)
+                work.rewrite_images(options=_rewrite_options(opt))
             except Exception:
                 _manual_recompress(work, opt, progress)
         else:
@@ -224,6 +223,26 @@ def compress(doc: fitz.Document, out_path: str, level: str = "high",
     os.replace(tmp, out_path)
     _say(progress, 2, 2, "압축 끝")
     return {"before": before, "after": after}
+
+
+def _rewrite_options(opt: dict):
+    """rewrite_images 기본(평균 솎기)은 정수배로만 줄여 212dpi 스캔이 120dpi 로 안 줄었다(중간·낮음이 같은 크기).
+    컬러·회색은 bicubic 으로 목표 해상도에 맞춰 줄인다. 흑백(1비트)은 팩스 압축이라 평균 솎기 그대로."""
+    m = fitz.mupdf
+    o = m.PdfImageRewriterOptions()
+    q = str(opt["quality"])
+    for kind in ("color_lossless", "color_lossy", "gray_lossless", "gray_lossy"):
+        setattr(o, f"{kind}_image_recompress_method", m.FZ_RECOMPRESS_JPEG)
+        setattr(o, f"{kind}_image_subsample_method", m.FZ_SUBSAMPLE_BICUBIC)
+        setattr(o, f"{kind}_image_subsample_threshold", opt["dpi_threshold"])
+        setattr(o, f"{kind}_image_subsample_to", opt["dpi_target"])
+        setattr(o, f"{kind}_image_recompress_quality", q)
+    o.bitonal_image_recompress_method = m.FZ_RECOMPRESS_FAX
+    o.bitonal_image_subsample_method = m.FZ_SUBSAMPLE_AVERAGE
+    o.bitonal_image_subsample_threshold = opt["dpi_threshold"]
+    o.bitonal_image_subsample_to = opt["dpi_target"]
+    o.bitonal_image_recompress_quality = q
+    return o
 
 
 def _manual_recompress(work: fitz.Document, opt: dict, progress: Progress) -> None:
