@@ -493,35 +493,68 @@ class AnnotPanel(QWidget):
         lay = QVBoxLayout(self); lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(0)
         lay.addWidget(panel_head("주석", tuple((name, tip, lambda _=False, k=key: self._action(k)) for name, tip, key in (
             ("import", "주석 가져오기", "import"), ("export", "주석 내보내기", "export"), ("delete", "모두 삭제", "delete_all")))))
-        box = QWidget(); bl = QVBoxLayout(box); bl.setContentsMargins(8, 6, 8, 6)
+        box = QWidget(); bl = QVBoxLayout(box); bl.setContentsMargins(8, 6, 8, 6); bl.setSpacing(4)
+        row = QHBoxLayout(); row.setSpacing(4)
         self.filter = QComboBox(); self.filter.addItems(["전체"] + sorted(set(A.KIND_NAMES.values())))
         self.filter.currentIndexChanged.connect(self.reload)
-        bl.addWidget(self.filter); lay.addWidget(box)
+        # 묶는 기준(알PDF 주석 목록: 쪽·날짜·작성자·종류). 저장하지 않고 늘 쪽순으로 연다
+        self.group = QComboBox(); self.group.addItems(["쪽순", "날짜순", "작성자순", "종류순"])
+        self.group.currentIndexChanged.connect(self.reload)
+        row.addWidget(self.filter, 1); row.addWidget(self.group, 1); bl.addLayout(row)
+        self.find = QLineEdit(); self.find.setPlaceholderText("내용·작성자 찾기"); self.find.setClearButtonEnabled(True)
+        self.find.textChanged.connect(self.reload)
+        bl.addWidget(self.find); lay.addWidget(box)
         self.tree = QTreeWidget(); self.tree.setHeaderLabels(["종류", "내용", "작성자"]); _tidy_tree(self.tree, 1)
         self.tree.itemClicked.connect(self._clicked)
+        self.tree.itemDoubleClicked.connect(lambda it, _c: (d := it.data(0, Qt.ItemDataRole.UserRole)) and self._edit(d))
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._menu)
         lay.addWidget(self.tree)
+        self.empty = QLabel(""); self.empty.setObjectName("dim"); self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty.hide(); lay.addWidget(self.empty)
         self.reload()
+
+    @staticmethod
+    def _day(mod: str) -> str:
+        s = (mod or "").removeprefix("D:")
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if len(s) >= 8 and s[:8].isdigit() else "날짜 없음"
 
     def reload(self):
         self.tree.clear()
         want = self.filter.currentText()
-        by_page: dict[int, QTreeWidgetItem] = {}
+        q = self.find.text().strip().lower()
+        how = self.group.currentIndex()
+        rows = []
         for a in A.list_annots(self.doc):
             if a.kind in ("Link", "Widget", "Popup"):
                 continue
             if want != "전체" and a.kind_ko != want:
                 continue
-            if a.page not in by_page:
-                pit = QTreeWidgetItem([f"{a.page + 1}쪽", "", ""])
+            if q and q not in (a.content or "").lower() and q not in (a.author or "").lower():
+                continue
+            head = (f"{a.page + 1}쪽", self._day(a.modified), a.author or "작성자 없음", a.kind_ko)[how]
+            key = (a.page, "", a.author or "￿", a.kind_ko)[how]
+            if how == 1:
+                key = "" if head == "날짜 없음" else head
+            rows.append((key, head, a))
+        # 날짜는 새것부터, 나머지는 오름차순. 같은 묶음 안은 문서 차례(쪽 → 쪽 안 차례)
+        rows.sort(key=lambda r: r[0], reverse=(how == 1))
+        groups: dict[str, QTreeWidgetItem] = {}
+        for _key, head, a in rows:
+            if head not in groups:
+                pit = QTreeWidgetItem([head, "", ""])
                 pit.setFlags(pit.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 self.tree.addTopLevelItem(pit)
-                by_page[a.page] = pit
+                groups[head] = pit
             it = QTreeWidgetItem([a.kind_ko, a.content, a.author])
+            if how != 0:
+                it.setText(0, f"{a.page + 1}쪽 {a.kind_ko}" if how != 3 else f"{a.page + 1}쪽")
             it.setData(0, Qt.ItemDataRole.UserRole, (a.page, a.xref, a.rect))
-            by_page[a.page].addChild(it)
+            groups[head].addChild(it)
         self.tree.expandAll()
+        self.empty.setText("찾은 주석 없음" if (q or want != "전체") else "주석 없음")
+        self.empty.setVisible(not rows)
+        self.tree.setVisible(bool(rows))
 
     def _clicked(self, it, _):
         d = it.data(0, Qt.ItemDataRole.UserRole)

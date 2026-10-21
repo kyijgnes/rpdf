@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """주석 엔진 시험(글상자 색·삽입 기호·종류별 기본값·XFDF/FDF). 작은 PDF 를 그 자리에서 만들어 쓴다."""
 from __future__ import annotations
 
@@ -203,3 +203,109 @@ def test_props_panel_shows_kind_fields_and_remembers(tmp_path):
         assert not p.info_box.isVisibleTo(p)
     finally:
         v.close()
+
+
+# ── XFDF · FDF ─────────────────────────────────────────────────────────
+def _sample_doc() -> Document:
+    d = Document()
+    d.fitz[0].insert_text((72, 100), "Hello world line one", fontsize=14)
+    d.fitz[0].insert_text((72, 120), "second line text here", fontsize=14)
+    A.text_markup(d, 0, [fitz.Rect(72, 88, 230, 104), fitz.Rect(72, 108, 230, 124)], "Highlight", content="강조 메모")
+    A.text_markup(d, 0, [fitz.Rect(72, 88, 230, 104)], "Underline", color=RED)
+    A.rect(d, 0, fitz.Rect(100, 200, 200, 300), width=6, author="윤성지")
+    A.oval(d, 0, fitz.Rect(220, 200, 300, 260), width=1.5, fill=(0, 1, 0), opacity=0.5)
+    A.line(d, 0, fitz.Point(100, 400), fitz.Point(300, 450), width=3, arrow=True)
+    A.ink(d, 0, [[fitz.Point(50, 600), fitz.Point(150, 650)], [fitz.Point(60, 610), fitz.Point(70, 700)]], width=4)
+    A.polygon(d, 0, [fitz.Point(400, 400), fitz.Point(500, 420), fitz.Point(450, 500)], width=2, cloud=True)
+    A.polygon(d, 0, [fitz.Point(400, 600), fitz.Point(500, 620), fitz.Point(450, 700)], closed=False)
+    A.free_text(d, 0, fitz.Rect(300, 500, 450, 560), "리치 글상자 & <태그>", 18, RED, YELLOWISH, BLUE, 2)
+    A.free_text(d, 0, fitz.Rect(300, 600, 450, 660), "보통 글", 15, BLUE, None, BLUE, 1)
+    A.free_text(d, 0, fitz.Rect(300, 700, 450, 760), "말풍선", 13, (0, 0, 0), (1, 1, 1), (0, 0, 0), 1, callout=fitz.Point(260, 800))
+    A.note(d, 0, fitz.Point(20, 20), "메모", icon="Comment")
+    A.caret(d, 0, fitz.Point(200, 130), "끼움")
+    x = A.rect(d, 0, fitz.Rect(20, 760, 80, 800))
+    A.update(d, 0, x, dashes=(3, 3))
+    return d
+
+
+def _sig(doc):
+    out = []
+    for a in doc.fitz[0].annots():
+        k = a.type[1]
+        if k == "Popup":
+            continue
+        b = a.border or {}
+        cols = {n: tuple(round(c, 2) for c in v) if v else None for n, v in A.annot_colors(doc, a).items()}
+        op = a.opacity
+        out.append((k, [round(x) for x in a.rect], b.get("width"), b.get("clouds"), tuple(b.get("dashes") or ()),
+                    a.line_ends if k == "Line" else None, A._freetext_style(doc, a) if k == "FreeText" else None,
+                    len(a.vertices or []) if k != "FreeText" else None, cols, round(op if op is not None and op >= 0 else 1, 2),
+                    a.info.get("content"), a.info.get("title")))
+    return out
+
+
+def test_xfdf_roundtrip():
+    from app.engine import annot_xfdf as X
+    d = _sample_doc()
+    data, n, skipped = X.to_xfdf(d, "원본.pdf")
+    assert n == len(_sig(d)) and skipped == 0
+    assert b"<highlight" in data and b"&amp; &lt;" in data
+    e = Document()
+    assert X.import_xfdf(e, data) == (n, 0)
+    assert _sig(d) == _sig(e)
+
+
+def test_fdf_roundtrip():
+    from app.engine import annot_xfdf as X
+    d = _sample_doc()
+    data, n, _ = X.to_fdf(d, "원본.pdf")
+    assert data.startswith(b"%FDF-1.2")
+    e = Document()
+    assert X.import_fdf(e, data) == (n, 0)
+    assert _sig(d) == _sig(e)
+
+
+def test_xfdf_from_other_app():
+    """다른 프로그램이 만든 XFDF(이름공간·리치텍스트 내용·모르는 종류)도 읽는다."""
+    from app.engine import annot_xfdf as X
+    data = '''<?xml version="1.0" encoding="UTF-8"?>
+<xfdf xmlns="http://ns.adobe.com/xfdf/" xml:space="preserve"><annots>
+<square page="0" rect="100,500,200,600" color="#FF0000" width="2" title="남"><contents>네모</contents></square>
+<freetext page="0" rect="100,300,300,350" color="#FFFFCC" width="1">
+<contents-richtext><body xmlns="http://www.w3.org/1999/xhtml"><p>첫 줄</p><p>둘째 줄</p></body></contents-richtext>
+<defaultappearance>0 0 1 rg /Helv 16 Tf</defaultappearance></freetext>
+<sound page="0" rect="1,1,2,2"/>
+<square page="9" rect="1,1,20,20"/>
+</annots></xfdf>'''.encode("utf-8")
+    d = Document()
+    assert X.import_xfdf(d, data) == (2, 2)
+    pg = d.fitz[0]  # 쪽을 붙잡아 둔다(주석은 쪽을 약하게만 잡는다)
+    got = {a.type[1]: a for a in pg.annots()}
+    assert got["Square"].info["content"] == "네모" and got["Square"].info["title"] == "남"
+    r = got["Square"].rect
+    assert abs(r.y0 - (842 - 600)) <= 2 and abs(r.x0 - 100) <= 2   # PDF 좌표(아래가 0)를 쪽 좌표로
+    ft = got["FreeText"]
+    assert ft.info["content"] == "첫 줄\n둘째 줄" and A._freetext_style(d, ft) == (16.0, BLUE)
+
+
+def test_annot_list_group_and_find():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])  # noqa: F841
+    from app.ui.sidebar import AnnotPanel
+    d = Document()
+    d.fitz.new_page()
+    A.rect(d, 1, fitz.Rect(10, 10, 60, 60), author="나")
+    A.note(d, 0, fitz.Point(20, 20), "숙제 확인", author="너")
+    A.caret(d, 0, fitz.Point(100, 100), "끼움", author="나")
+    p = AnnotPanel(d)
+    heads = lambda: [p.tree.topLevelItem(i).text(0) for i in range(p.tree.topLevelItemCount())]  # noqa: E731
+    assert heads() == ["1쪽", "2쪽"]
+    p.group.setCurrentIndex(2)
+    assert heads() == ["나", "너"] and p.tree.topLevelItem(0).childCount() == 2
+    p.group.setCurrentIndex(3)
+    assert sorted(heads()) == sorted(["노트", "삽입 기호", "직사각형"])
+    p.find.setText("숙제")
+    assert heads() == ["노트"]
+    p.find.setText("없는 말")
+    assert p.empty.isVisibleTo(p) and p.empty.text() == "찾은 주석 없음"
