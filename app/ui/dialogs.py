@@ -225,7 +225,8 @@ class FieldAlignDialog(FormDialog):
         super().__init__(f"양식 칸 맞추기 · {page_no + 1}쪽", parent, "맞추기")
         self.list = QListWidget()
         for xref, name, kind in widgets:
-            it = QListWidgetItem(f"{name}  ({kind})"); it.setData(Qt.ItemDataRole.UserRole, xref)
+            ko = A.FIELD_TYPE_KO.get(kind.lower().replace("radiobutton", "radio").replace("combobox", "combo").replace("listbox", "list"), kind)
+            it = QListWidgetItem(f"{name}  ({ko})"); it.setData(Qt.ItemDataRole.UserRole, xref)
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             it.setCheckState(Qt.CheckState.Checked if xref in picked or not picked else Qt.CheckState.Unchecked)
             self.list.addItem(it)
@@ -535,7 +536,7 @@ class HeaderFooterDialog(DecoDialog):
              ("footer_left", "바닥글 왼쪽"), ("footer_center", "바닥글 가운데"), ("footer_right", "바닥글 오른쪽")]
 
     def __init__(self, parent, total: int, current: int, update: bool = False):
-        super().__init__("머리글 & 바닥글", parent, total, current, update)
+        super().__init__("머리글·바닥글", parent, total, current, update)
         self.form.addRow(QLabel("쓸 수 있는 자리표: {page} 쪽 번호 · {total} 마지막 번호 · {date} 날짜 · {file} 파일 이름"))
         self.slots = {key: self.add(label, QLineEdit()) for key, label in self.SLOTS}
         self.size = self.add("글자 크기", QSpinBox()); self.size.setRange(5, 40); self.size.setValue(10)
@@ -721,7 +722,7 @@ class EncryptDialog(FormDialog):
 
 class RedactSearchDialog(FormDialog):
     def __init__(self, parent, total: int, current: int):
-        super().__init__("검색 & 교정", parent, "표시")
+        super().__init__("검색·교정", parent, "표시")
         self.pattern = self.add("찾을 글자", QLineEdit())
         self.regex = self.add("", QCheckBox("정규식으로"))
         self.presets = self.add("자주 쓰는 것", QComboBox())
@@ -1094,7 +1095,7 @@ class ProgressDialog(QDialog):
         self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
         lay = QVBoxLayout(self)
         self.label = QLabel("준비 중"); lay.addWidget(self.label)
-        self.bar = QProgressBar(); self.bar.setRange(0, 0); lay.addWidget(self.bar)
+        self.bar = QProgressBar(); self.bar.setRange(0, 0); self.bar.setTextVisible(False); lay.addWidget(self.bar)   # 막대가 6px 라 글자는 뺀다
         self.result = None
         self.error: str | None = None
         self.worker = Worker(fn, *args, **kwargs)

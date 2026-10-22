@@ -722,7 +722,7 @@ class PrintDialog(QDialog):
         for d in DPIS:
             self.dpi.addItem(f"{d}dpi", d)
         self.dpi.setCurrentIndex(max(0, self.dpi.findData(r.get("dpi", 300))))
-        self.dpi.setFixedWidth(82)
+        self.dpi.setFixedWidth(96)
         irow.addWidget(self.as_image); irow.addWidget(self.dpi); irow.addStretch(); lv.addLayout(irow)
 
         self._head(lv, "방향")

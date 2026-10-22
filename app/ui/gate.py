@@ -66,6 +66,7 @@ class GateDialog(QDialog):
         get = v.kind in (PL.BLOCKED, PL.OUTDATED)
         self.get_btn.setVisible(get)
         self.get_btn.setDefault(get); self.again_btn.setDefault(not get)   # 할 일 하나만 파랗게
+        self.adjustSize()   # 글이 길어져 줄이 늘면 창도 늘린다
 
     def _busy(self, text: str):
         self.note.setText(text)
@@ -110,6 +111,7 @@ class GateDialog(QDialog):
         self._idle()
         if rel is None:
             self.note.setText(f"새 버전을 확인하지 못했습니다 · {err}")
+            self.adjustSize()
             return
         if not rel.newer:
             self.note.setText(f"아직 새 버전이 없습니다 · 지금 {VERSION}")

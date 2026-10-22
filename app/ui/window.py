@@ -765,7 +765,9 @@ class MainWindow(QMainWindow):
         t.viewer.set_tool(key)
         self.ribbon.reflect_tool(key)
         self._sync_status(t)
-        if key in LABELS and key not in ("hand", "select", "form", "edit"):
+        if key in ("hand", "select"):
+            self.say("")
+        elif key in LABELS and key not in ("form", "edit"):
             self.say(f"{LABELS[key]}: 문서 위에서 끌어 그리세요. Esc 로 그만둡니다.")
 
     def on_toggle(self, key: str, on: bool):
@@ -1775,11 +1777,12 @@ class MainWindow(QMainWindow):
 
     def preferences(self):
         dlg = D.PreferencesDialog(self, self.prefs)
-        from PySide6.QtWidgets import QTabWidget
+        from PySide6.QtWidgets import QLayout, QTabWidget
         keys = K.ShortcutEditor(self.settings.get("hotkeys"))
         tabs = dlg.findChild(QTabWidget)
         if tabs is not None:   # 환경 설정 창 탭에 「단축키」 를 하나 더 단다
             tabs.addTab(keys, "단축키")
+            dlg.layout().setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)   # 단축키 표가 잘리지 않게 창을 표 최소 크기 이상으로
         if dlg.exec():
             self.prefs.update(dlg.values())
             if tabs is not None:

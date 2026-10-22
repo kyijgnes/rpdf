@@ -902,6 +902,6 @@ class FieldPanel(QWidget):
     def reload(self):
         self.tree.clear()
         for f in A.fields(self.doc):
-            it = QTreeWidgetItem([f["name"], A.FIELD_TYPE_KO.get(f["type"].lower().replace("button", "button"), f["type"]), str(f["value"] or "")])
+            it = QTreeWidgetItem([f["name"], A.FIELD_TYPE_KO.get(f["type"].lower().replace("button", "button"), f["type"]), "꺼짐" if str(f["value"]) == "Off" else str(f["value"] or "")])
             it.setData(0, Qt.ItemDataRole.UserRole, (f["page"], f["rect"]))
             self.tree.addTopLevelItem(it)

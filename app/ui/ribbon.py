@@ -29,7 +29,7 @@ TABS: list[tuple[str, str, list]] = [
         ("link", "link", "링크 추가", "tool", None), SEP,
         ("watermark", "watermark", "워터마크", "action", [("watermark", "추가"), ("watermark_update", "업데이트"), ("watermark_remove", "삭제")]),
         ("background", "background", "배경화면", "action", [("background", "추가"), ("background_update", "업데이트"), ("background_remove", "삭제")]),
-        ("headerfooter", "headerfooter", "머리글 & 바닥글", "action", [("headerfooter", "추가"), ("headerfooter_update", "업데이트"), ("headerfooter_remove", "삭제")]),
+        ("headerfooter", "headerfooter", "머리글·바닥글", "action", [("headerfooter", "추가"), ("headerfooter_update", "업데이트"), ("headerfooter_remove", "삭제")]),
         ("pagenumber", "bates", "쪽 번호", "action", [("pagenumber", "추가"), ("pagenumber_update", "업데이트"), ("pagenumber_remove", "삭제")]),
         ("edit_more", "more", "더보기", "menu", [("bates", "베이츠 번호 추가"), ("bates_update", "베이츠 번호 업데이트"), ("bates_remove", "베이츠 번호 삭제"), ("pagelabel", "페이지 레이블"),
                                                  ("replace_image", "이미지 바꾸기(고른 것)"), ("delete_sel", "고른 것 삭제")]),
@@ -107,7 +107,7 @@ TABS: list[tuple[str, str, list]] = [
     ]),
     ("protect", "보안", [
         ("encrypt", "lock", "암호화", "action", None), ("decrypt", "unlock", "암호 풀기", "action", None), SEP,
-        ("redact", "redact", "교정 표시", "tool", None), ("redact_search", "redactsearch", "검색 & 교정", "action", None),
+        ("redact", "redact", "교정 표시", "tool", None), ("redact_search", "redactsearch", "검색·교정", "action", None),
         ("redact_apply", "redactapply", "교정 적용", "action", None), ("hidden", "hidden", "숨겨진 데이터 삭제", "action", None), SEP,
         ("digital_sign", "cert", "디지털 서명", "action", None),
         ("sign_manage", "signature", "서명 관리", "menu", [("sign_new", "서명 이미지 등록"), ("sign_apply", "서명 넣기"), ("sign_clear", "등록한 서명 지우기")]),

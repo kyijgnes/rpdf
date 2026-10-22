@@ -510,7 +510,7 @@ def page_numbers(doc: fitz.Document, style: str = "{page}", position: str = "foo
 # ── 꾸미기 표시: 넣은 것을 나중에 찾아 고치고 지운다 ─────────────────────
 # 꾸미기 하나를 쪽마다 폼 객체(XObject) 하나로 넣고, 그 객체에 /RPDFDeco(종류)·/RPDFSet(설정 JSON)을 단다.
 # 그냥 글·그림으로 그리면 본문과 섞여 다시 찾을 수 없었다(의 추가·업데이트·삭제를 따라 함).
-DECO_KINDS = {"watermark": "워터마크", "background": "배경", "header_footer": "머리글 & 바닥글",
+DECO_KINDS = {"watermark": "워터마크", "background": "배경", "header_footer": "머리글·바닥글",
               "page_number": "쪽 번호", "bates": "베이츠 번호"}
 
 

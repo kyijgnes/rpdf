@@ -127,6 +127,12 @@ def label(keys: dict[str, list[str]], action: str) -> str:
     return QKeySequence(seqs[0]).toString(QKeySequence.SequenceFormat.NativeText) if seqs else ""
 
 
+
+def _no_hint(e: QKeySequenceEdit):
+    """빈 칸의 Qt 기본 안내 글(영어 「Press shortcut」)을 뺀다. Qt 가 키를 넣거나 지울 때마다 다시 넣어서 그때마다 부른다."""
+    for le in e.findChildren(QLineEdit):
+        le.setPlaceholderText("")
+
 class ShortcutEditor(QWidget):
     """환경 설정 「단축키」 칸: 동작마다 키 셋. 칸을 누르고 키를 누르면 바뀐다. 겹친 키는 그 줄을 빨갛게."""
 
@@ -159,6 +165,7 @@ class ShortcutEditor(QWidget):
                 e = QKeySequenceEdit(); e.setMaximumSequenceLength(1); e.setClearButtonEnabled(True)
                 e.editingFinished.connect(lambda k=k: self._edited(k))
                 e.keySequenceChanged.connect(lambda _s, k=k: self._edited(k))
+                e.keySequenceChanged.connect(lambda _s, e=e: _no_hint(e))
                 self.table.setCellWidget(row, 2 + n, e); eds.append(e)
             self.edits[k] = eds
         self.table.setMinimumSize(560, 360)
@@ -172,6 +179,7 @@ class ShortcutEditor(QWidget):
                 e.blockSignals(True)
                 e.setKeySequence(QKeySequence(seqs[n]) if n < len(seqs) else QKeySequence())
                 e.blockSignals(False)
+                _no_hint(e)
         self._mark()
 
     def _edited(self, k: str):
