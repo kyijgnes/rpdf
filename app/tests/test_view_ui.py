@@ -123,6 +123,17 @@ def test_history_back_forward(win, pdf):
     v.next_page(); assert not v._fwd or v.current == 6   # 한 쪽 넘기기는 기록하지 않는다
 
 
+def test_ctrl_a_ctrl_c_copies_text(win, pdf):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    win.open_path(pdf); pump(0.2)
+    v = win.cur().viewer; v.setFocus(); pump(0.05)
+    QApplication.clipboard().setText("")
+    QTest.keyClick(v, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClick(v, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier); pump(0.05)
+    assert QApplication.clipboard().text() == "1쪽 사과 하나\n둘째 줄 사과 둘"
+
+
 def test_search_count_and_replace_one(win, pdf):
     win.open_path(pdf); pump(0.2)
     t = win.cur(); s = t.search

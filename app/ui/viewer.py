@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 
 import fitz
 from PySide6.QtCore import QPointF, QRectF, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QImage, QKeyEvent, QMouseEvent, QPainter, QPainterPath,
-                           QPen, QPixmap, QPolygonF, QWheelEvent)
+from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QImage, QKeyEvent, QKeySequence, QMouseEvent, QPainter,
+                           QPainterPath, QPen, QPixmap, QPolygonF, QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QGraphicsItem, QGraphicsScene, QGraphicsView, QInputDialog, QMenu,
                                QStyleOptionGraphicsItem, QWidget)
 
@@ -915,9 +915,9 @@ class PageView(QGraphicsView):
         if (k == Qt.Key.Key_PageUp or (ctrl and k == Qt.Key.Key_Up) or (enter and shift)
                 or (k == Qt.Key.Key_Left and self.layout_mode in ("single", "facing"))):
             self.prev_page(); return
-        if e.matches(e.StandardKey.Copy):
+        if e.matches(QKeySequence.StandardKey.Copy):
             self.copy_selection(); return
-        if e.matches(e.StandardKey.SelectAll) and self.tool in ("select", "hand"):
+        if e.matches(QKeySequence.StandardKey.SelectAll) and self.tool in ("select", "hand"):
             i = self.current
             ws = self.words(i)
             if ws:
