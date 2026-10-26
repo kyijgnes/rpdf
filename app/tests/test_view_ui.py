@@ -134,6 +134,32 @@ def test_ctrl_a_ctrl_c_copies_text(win, pdf):
     assert QApplication.clipboard().text() == "1쪽 사과 하나\n둘째 줄 사과 둘"
 
 
+def test_shifted_keys_clash():
+    # 큰 키판 Ctrl++ 는 손으로 Ctrl+Shift+= 라 오른쪽 회전과 겹친다(겹치면 Qt 가 둘 다 안 부른다)
+    assert K.physical("Ctrl++") == K.physical("Ctrl+Shift+=") and K.physical("Ctrl+@") == "Ctrl+Shift+2"
+    assert K.clashes(K.current({"zoomin": ["Ctrl+=", "Ctrl++"]}))
+
+
+def test_keypad_plus_zooms(win, pdf):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    win.open_path(pdf); pump(0.2)
+    v = win.cur().viewer; v.zoom_mode = "fixed"; v.set_zoom(1.0)
+    QTest.keyClick(v, Qt.Key.Key_Plus, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.KeypadModifier)
+    assert abs(v.zoom - 1.25) < 1e-6
+
+
+def test_bookmark_add_then_f2_renames(win, pdf, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+    win.open_path(pdf); pump(0.2)
+    t = win.cur()
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("첫 이름", True)))
+    win.on_action("bookmark_add"); t.side.hide(); pump(0.05)
+    win.on_action("bookmark_rename"); pump(0.05)   # 패널이 닫혀 있어도 열고 이름 칸을 연다
+    tr = t.bookmarks.tree
+    assert t.side.isVisible() and t.side_key == "bookmark" and tr.state() == tr.State.EditingState
+
+
 def test_search_count_and_replace_one(win, pdf):
     win.open_path(pdf); pump(0.2)
     t = win.cur(); s = t.search

@@ -38,7 +38,7 @@ TABLE: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("zoom_width", "확대", "창 너비에 맞추기", ("Ctrl+2",)),
     ("zoom_height", "확대", "창 높이에 맞추기", ("Ctrl+3",)),
     ("zoom_page", "확대", "창 크기에 맞추기", ("Ctrl+0",)),
-    ("zoomin", "확대", "확대", ("Ctrl+=", "Ctrl++")),
+    ("zoomin", "확대", "확대", ("Ctrl+=",)),   # Ctrl++ 는 큰 키판에서 Ctrl+Shift+= (오른쪽 회전)와 같은 키. 숫자 키판 + 는 뷰어가 받는다
     ("zoomout", "확대", "축소", ("Ctrl+-",)),
     ("layout_continuous", "보기", "한 페이지 연속", ("Ctrl+4",)),
     ("layout_single", "보기", "한 페이지씩", ("Ctrl+5",)),
@@ -98,6 +98,25 @@ def norm(seq: str) -> str:
     return QKeySequence(seq).toString(QKeySequence.SequenceFormat.PortableText)
 
 
+# Shift 를 눌러야 나오는 글자 → (Shift 없이 누르는 키). 「Ctrl++」 는 손으로는 Ctrl+Shift+= 라 둘을 같은 키로 본다
+_SHIFTED = {"+": "=", "_": "-", "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8",
+            "(": "9", ")": "0", ":": ";", "<": ",", ">": ".", "?": "/", '"': "'", "{": "[", "}": "]", "|": "\\", "~": "`"}
+
+
+def physical(seq: str) -> str:
+    """손으로 누르는 키로 맞춘 글자(겹침 검사용). 「Ctrl++」 → 「Ctrl+Shift+=」."""
+    s = norm(seq)
+    if not s:
+        return s
+    head, _, ch = (s[:-2], "+", "+") if s.endswith("++") else s.rpartition("+")
+    if ch in _SHIFTED:
+        mods = [m for m in head.split("+") if m]
+        if "Shift" not in mods:
+            mods.append("Shift")
+        return norm("+".join(mods + [_SHIFTED[ch]]))
+    return s
+
+
 def current(overrides: dict | None) -> dict[str, list[str]]:
     """동작마다 지금 쓰는 키(바꾼 것이 있으면 그것)."""
     out = {k: list(v) for k, v in DEFAULTS.items()}
@@ -117,7 +136,7 @@ def clashes(keys: dict[str, list[str]]) -> dict[str, set[str]]:
     who: dict[str, set[str]] = {}
     for k, seqs in keys.items():
         for s in seqs:
-            who.setdefault(norm(s), set()).add(k)
+            who.setdefault(physical(s), set()).add(k)
     return {s: ks for s, ks in who.items() if len(ks) > 1}
 
 

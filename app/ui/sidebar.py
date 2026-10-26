@@ -460,6 +460,7 @@ class BookmarkPanel(QWidget):
             self.tree.insertTopLevelItem(self.tree.indexOfTopLevelItem(cur) + 1, it)
         else:
             self.tree.addTopLevelItem(it)
+        self.tree.setCurrentItem(it)   # 바로 F2 로 이름을 고칠 수 있게
         self._save()
 
     def _menu(self, pos):

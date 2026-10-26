@@ -915,6 +915,8 @@ class PageView(QGraphicsView):
         if (k == Qt.Key.Key_PageUp or (ctrl and k == Qt.Key.Key_Up) or (enter and shift)
                 or (k == Qt.Key.Key_Left and self.layout_mode in ("single", "facing"))):
             self.prev_page(); return
+        if ctrl and k == Qt.Key.Key_Plus and e.modifiers() & Qt.KeyboardModifier.KeypadModifier:
+            self.zoom_in(); return   # 숫자 키판 + (큰 키판 Ctrl++ 는 Ctrl+Shift+= 오른쪽 회전이라 단축키 표에 없다)
         if e.matches(QKeySequence.StandardKey.Copy):
             self.copy_selection(); return
         if e.matches(QKeySequence.StandardKey.SelectAll) and self.tool in ("select", "hand"):

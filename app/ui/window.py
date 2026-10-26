@@ -767,6 +767,8 @@ class MainWindow(QMainWindow):
         self._sync_status(t)
         if key in ("hand", "select"):
             self.say("")
+        elif key in ("note", "caret", "attach"):   # 한 번 누르면 바로 넣는 도구
+            self.say(f"{LABELS[key]}: 넣을 자리를 누르세요. Esc 로 그만둡니다.")
         elif key in LABELS and key not in ("form", "edit"):
             self.say(f"{LABELS[key]}: 문서 위에서 끌어 그리세요. Esc 로 그만둡니다.")
 
@@ -867,7 +869,10 @@ class MainWindow(QMainWindow):
                 self.ribbon.set_tab(keys[(i + (1 if key == "ribbon_next" else -1)) % len(keys)])
             elif key == "ribbon_fold": self.ribbon.stack.setVisible(not self.ribbon.stack.isVisible())
             elif key == "bookmark_add": t.show_side("bookmark") if not t.side.isVisible() else None; t.bookmarks.add()
-            elif key == "bookmark_rename": t.bookmarks.rename_current()
+            elif key == "bookmark_rename":
+                if not t.bookmarks.tree.currentItem(): self.say("이름을 바꿀 북마크를 먼저 고르세요"); return
+                if not (t.side.isVisible() and t.side_key == "bookmark"): t.show_side("bookmark")
+                t.bookmarks.rename_current()
             elif key == "edit_all_toggle": on = not v.edit_mode; v.set_edit_mode(on); self.ribbon.set_toggle("edit_all", on)
             elif key == "tool_hand": self.on_tool("hand")
             elif key == "tool_select": self.on_tool("select")
