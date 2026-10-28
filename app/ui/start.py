@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu,
                                QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem, QToolButton, QVBoxLayout, QWidget)
@@ -30,6 +31,37 @@ def _ago(ts: float) -> str:
     if d < 7 * 86400:
         return "지난 주" if d > 86400 else "어제"
     return "이전"
+
+
+def _stat(path: str) -> tuple[bool, float, int, bool]:
+    """(있나, 수정 시각, 크기, 폴더인가). 닿지 않는 공유폴더(\\\\192.168…)는 여기서 몇 초씩 걸린다."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False, 0.0, 0, False
+    return True, st.st_mtime, st.st_size, os.path.isdir(path)
+
+
+class _Stats(QObject):
+    """최근 파일이 있는지·크기를 일꾼 스레드에서 본다. 닿지 않는 공유폴더 경로 하나가 화면 스레드를
+    8초씩 붙잡아 켤 때·마지막 탭을 닫을 때 「응답 없음」이 났다(10-29)."""
+    got = Signal(str, object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.known: dict[str, tuple] = {}
+        self._pending: set[str] = set()
+        self.got.connect(self._got)
+
+    def ask(self, path: str):
+        if path in self._pending:   # 아직 답을 기다리는 경로(닿지 않는 곳)는 또 묻지 않는다
+            return
+        self._pending.add(path)
+        threading.Thread(target=lambda: self.got.emit(path, _stat(path)), daemon=True).start()
+
+    def _got(self, path: str, st: tuple):
+        self._pending.discard(path)
+        self.known[path] = st
 
 
 class ToolCard(QFrame):
@@ -155,6 +187,8 @@ class StartPage(QWidget):
         self.table.customContextMenuRequested.connect(self._menu)
         rl.addWidget(self.table)
         root.addWidget(right, 1)
+        self.stats = _Stats(self)
+        self.stats.got.connect(self._stat_got)
         self.reload()
 
     def set_mode(self, m: str):
@@ -163,16 +197,17 @@ class StartPage(QWidget):
         self.reload()
 
     def _rows(self) -> list[dict]:
+        """디스크는 건드리지 않는다(있는지·크기는 _Stats 가 뒤에서 본다)."""
         q = self.search.text().strip().lower()
         if self.mode == "folder":
             seen, out = set(), []
             for r in self.recent:
                 d = os.path.dirname(r["path"])
-                if d not in seen and os.path.isdir(d):
+                if d not in seen:
                     seen.add(d); out.append({"path": d, "time": r.get("time", 0), "dir": True})
             rows = out
         elif self.mode == "fav":
-            rows = [{"path": p, "time": os.path.getmtime(p) if os.path.exists(p) else 0} for p in self.favorites]
+            rows = [{"path": p, "time": 0} for p in self.favorites]
         else:
             rows = list(self.recent)
         return [r for r in rows if q in os.path.basename(r["path"]).lower()]
@@ -184,19 +219,40 @@ class StartPage(QWidget):
             name = QTableWidgetItem(os.path.basename(r["path"]) or r["path"])
             name.setIcon(icons.icon("folder" if r.get("dir") else "thumbs", 16, theme.ACCENT))
             name.setData(Qt.ItemDataRole.UserRole, r["path"])
+            name.setData(Qt.ItemDataRole.UserRole + 1, bool(r.get("dir")))
+            name.setData(Qt.ItemDataRole.UserRole + 2, r.get("time", 0))
             self.table.setItem(n, 0, name)
-            exists = os.path.exists(r["path"])
-            mt = os.path.getmtime(r["path"]) if exists else r.get("time", 0)
-            self.table.setItem(n, 1, QTableWidgetItem(_ago(mt) if exists else "파일 없음"))
-            size = ""
-            if exists and not r.get("dir"):
-                b = os.path.getsize(r["path"]); size = f"{b / 1024:.1f} KB" if b < 1024 * 1024 else f"{b / 1024 / 1024:.1f} MB"
-            it = QTableWidgetItem(size); it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.table.setItem(n, 2, it)
+            self._fill(n)
+            self.stats.ask(r["path"])
+
+    def _fill(self, n: int):
+        """n 번째 줄의 시간·크기 칸. 아직 못 본 경로는 최근 파일에 적어 둔 시각으로 두고 크기는 비운다."""
+        it0 = self.table.item(n, 0)
+        path, is_dir, t = it0.data(Qt.ItemDataRole.UserRole), it0.data(Qt.ItemDataRole.UserRole + 1), it0.data(Qt.ItemDataRole.UserRole + 2)
+        st = self.stats.known.get(path)
+        size = ""
+        if st is None:
+            when = _ago(t) if t else ""
+        elif not st[0]:
+            when = "파일 없음"
+        else:
+            when = _ago(st[1])
+            if not is_dir:
+                b = st[2]; size = f"{b / 1024:.1f} KB" if b < 1024 * 1024 else f"{b / 1024 / 1024:.1f} MB"
+        self.table.setItem(n, 1, QTableWidgetItem(when))
+        it = QTableWidgetItem(size); it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.table.setItem(n, 2, it)
+        self.table.setRowHidden(n, bool(is_dir and st is not None and not (st[0] and st[3])))   # 최근 폴더는 없는 폴더를 뺀다
+
+    def _stat_got(self, path: str, _st):
+        for n in range(self.table.rowCount()):
+            if self.table.item(n, 0).data(Qt.ItemDataRole.UserRole) == path:
+                self._fill(n)
 
     def _open_row(self, row, _):
-        p = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        if os.path.isdir(p):
+        it = self.table.item(row, 0)
+        p = it.data(Qt.ItemDataRole.UserRole)
+        if it.data(Qt.ItemDataRole.UserRole + 1):
             os.startfile(p)
         else:
             self.openPath.emit(p)
@@ -206,9 +262,10 @@ class StartPage(QWidget):
         if not it:
             return
         p = self.table.item(it.row(), 0).data(Qt.ItemDataRole.UserRole)
+        is_dir = self.table.item(it.row(), 0).data(Qt.ItemDataRole.UserRole + 1)
         m = QMenu(self)
         m.addAction("열기", lambda: self._open_row(it.row(), 0))
-        m.addAction("폴더 열기", lambda: os.startfile(os.path.dirname(p) if os.path.isfile(p) else p))
+        m.addAction("폴더 열기", lambda: os.startfile(p if is_dir else os.path.dirname(p)))
         if p in self.favorites:
             m.addAction("즐겨찾기에서 빼기", lambda: (self.favorites.remove(p), self.reload(), self.recentChanged.emit()))
         else:

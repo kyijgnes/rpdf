@@ -506,7 +506,9 @@ class MainWindow(QMainWindow):
         save_settings(self.settings)
 
     def open_dialog(self):
-        start_dir = os.path.dirname(self.settings["recent"][0]["path"]) if self.settings["recent"] else ""
+        last = self.settings["recent"][0]["path"] if self.settings["recent"] else ""
+        # 닿지 않는 공유폴더에서 시작하면 열기 창이 한참 멈춘다: 있다고 확인된 파일의 폴더에서만 시작
+        start_dir = os.path.dirname(last) if (self.start.stats.known.get(last) or (False,))[0] else ""
         paths, _ = QFileDialog.getOpenFileNames(self, "열기", start_dir, OPEN_FILTER)
         for p in paths:
             self.open_path(p)
@@ -576,7 +578,7 @@ class MainWindow(QMainWindow):
         t.close(); t.deleteLater()
         if not self._closing:
             save_settings(self.settings)   # 기억한 보기 자리(창을 닫을 때는 끝에 한 번만)
-        if not self.tabs:
+        if not self.tabs and not self._closing:   # 창을 닫는 중이면 시작 화면을 다시 그리지 않는다
             self.show_start()
         return True
 
@@ -1205,9 +1207,10 @@ class MainWindow(QMainWindow):
         vm.addAction("PDF/A", lambda: self.on_action("to_pdfa")); vm.addAction("압축한 PDF", lambda: self.on_action("compress")); vm.addAction("평면화한 PDF", lambda: self.on_action("flatten"))
         sm = m.addMenu(icons.icon("folder"), "최근 폴더에 저장"); sm.setEnabled(bool(t))
         seen = []
+        known = self.start.stats.known   # 디스크를 여기서 보지 않는다(닿지 않는 공유폴더가 메뉴를 몇 초씩 붙잡음): 있다고 확인된 파일의 폴더만
         for r in self.settings["recent"]:
             dd = os.path.dirname(r["path"])
-            if dd not in seen and os.path.isdir(dd):
+            if dd not in seen and (known.get(r["path"]) or (False,))[0]:
                 seen.append(dd); sm.addAction(dd, lambda p=dd: self.save_to_dir(p))
             if len(seen) >= 8: break
         if self.prefs.get("share_dir"):
