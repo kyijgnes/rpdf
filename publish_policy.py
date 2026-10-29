@@ -1,4 +1,4 @@
-"""RPDF 사용 제한(정책 파일) 걸기·풀기. 서명해서 GitHub 릴리스 `policy` 에 policy.json 으로 올린다(gh 필요).
+"""PDF메트리 사용 제한(정책 파일) 걸기·풀기. 서명해서 GitHub 릴리스 `policy` 에 policy.json 으로 올린다(gh 필요).
 
     python publish_policy.py                      지금 올라간 정책 보기
     python publish_policy.py 차단 "문구"           전부 차단(문구는 차단 화면에 보임)
@@ -114,7 +114,7 @@ def main() -> int:
     common.add_argument("--기한", dest="days", type=float, help="며칠 뒤 정책 무효")
     common.add_argument("--기한없음", dest="no_exp", action="store_true")
     common.add_argument("--out", help="올리지 않고 이 폴더에 policy.json 만")
-    ap = argparse.ArgumentParser(description="RPDF 사용 제한(정책) 걸기·풀기", parents=[common])
+    ap = argparse.ArgumentParser(description="PDF메트리 사용 제한(정책) 걸기·풀기", parents=[common])
     sub = ap.add_subparsers(dest="cmd")
     b = sub.add_parser("차단", aliases=["block"], parents=[common]); b.add_argument("message", nargs="?", default="")
     sub.add_parser("풀기", aliases=["unblock"], parents=[common])

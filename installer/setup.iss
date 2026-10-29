@@ -44,7 +44,7 @@ RestartApplications=no
 ChangesAssociations=yes
 ShowLanguageDialog=no
 SetupMutex={#AppMutex}.Setup
-; %TEMP%\Setup Log <날짜> #<번호>.txt (앱 안 업데이트는 %LOCALAPPDATA%\Temp\RPDF-update\setup.log)
+; %TEMP%\Setup Log <날짜> #<번호>.txt (앱 안 업데이트는 %LOCALAPPDATA%\Temp\<AppIdName>-update\setup.log)
 SetupLogging=yes
 
 [Languages]
@@ -291,7 +291,7 @@ begin
       RegDeleteKeyIncludingSubkeys(HKCU, 'Software\{#LegacyId}\Capabilities');
       RegDeleteKeyIfEmpty(HKCU, 'Software\{#LegacyId}');
     end;
-    // 0.1.3 까지 쓰던 이름(PDFEditor…)으로 등록한 것. 10-20 에 RPDF… 로 통일
+    // 바로 앞 이름(0.2.1 까지 RPDF…)으로 등록한 것. 10-29 에 PDFmetry… 로 바꿈(make_setup.py 의 OLD_*)
     if RegQueryStringValue(HKCU, 'Software\Classes\.pdf', '', V) and (CompareText(V, '{#OldProgId}') = 0) then
       RegDeleteValue(HKCU, 'Software\Classes\.pdf', '');
     RegDeleteValue(HKCU, 'Software\Classes\.pdf\OpenWithProgids', '{#OldProgId}');

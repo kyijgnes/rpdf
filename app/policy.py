@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import signing
-from .appinfo import APP_ID, VERSION
+from .appinfo import VERSION, data_dir
 from .updater import RELEASE_REPO, installed, parse_version, read_small
 
 POLICY_TAG = "policy"   # 정책만 담는 릴리스(사전 공개로 둬서 releases/latest 에 안 잡힌다)
@@ -31,7 +31,7 @@ SOURCE_ENV = "PDFAPP_POLICY_SOURCE"
 OFFLINE_DAYS = 7
 CHECK_EVERY = 6 * 3600          # 켜 둔 동안 다시 보는 간격(초)
 SKEW = 10 * 60                  # 시계 오차 봐주는 폭(초)
-STATE = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_ID, "policy_state.json")
+STATE = os.path.join(data_dir(), "policy_state.json")
 
 OK, BLOCKED, OUTDATED, NEED_ONLINE = "ok", "blocked", "outdated", "need_online"
 
@@ -94,7 +94,7 @@ def parse(envelope: bytes | str) -> Policy:
         raise PolicyError("정책 파일의 배포자 서명이 맞지 않습니다")
     try:
         d = json.loads(payload.decode("utf-8"))
-        if d.get("app") != "RPDF":
+        if d.get("app") != "RPDF":   # 서명한 정책 안의 열쇠라 앱 이름(PDF메트리)과 따로 둔다(옛 버전도 같은 정책을 읽음)
             raise PolicyError("다른 앱의 정책입니다")
         exp = d.get("expires")
         return Policy(serial=int(d["serial"]), issued=int(d.get("issued") or 0),

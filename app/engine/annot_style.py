@@ -181,8 +181,8 @@ class StyleStore:
 
 
 def default_path() -> str:
-    from ..appinfo import APP_ID
-    return os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_ID, "annot_styles.json")
+    from ..appinfo import data_dir
+    return os.path.join(data_dir(), "annot_styles.json")
 
 
 _store: StyleStore | None = None

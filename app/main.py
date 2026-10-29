@@ -17,7 +17,8 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv[:1])
-    from .appinfo import APP_ID, APP_NAME, ICON, ORG, VERSION
+    from .appinfo import APP_ID, APP_NAME, ICON, ORG, VERSION, copy_old_data
+    copy_old_data()   # 이름을 바꾼 뒤 첫 실행: 옛 설정·사용 확인을 새 자리로(사용 확인 화면보다 먼저)
     if sys.platform == "win32" and not getattr(sys, "frozen", False):
         # python 으로 띄울 때 작업표시줄이 python 아이콘 대신 앱 아이콘을 쓰게(exe 는 exe 아이콘을 쓴다)
         try:

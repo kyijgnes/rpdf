@@ -28,11 +28,13 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from . import signing
-from .appinfo import VERSION
+from .appinfo import APP_ID, VERSION
 
-RELEASE_REPO = "kyijgnes/rpdf"   # 10-20 pdf-app-releases 에서 이름을 바꿈(옛 주소는 GitHub 이 넘겨 주어 0.1.0 도 여기를 찾는다)
+# 10-20 pdf-app-releases 에서 이름을 바꿈(옛 주소는 GitHub 이 넘겨 주어 0.1.0 도 여기를 찾는다).
+# 10-29 앱 이름은 PDF메트리로 바꿨지만 저장소는 그대로 둔다(깔린 옛 버전이 이 주소로 새 버전을 찾는다)
+RELEASE_REPO = "kyijgnes/rpdf"
 LATEST_URL = f"https://github.com/{RELEASE_REPO}/releases/latest/download/latest.json"
-MUTEX_NAME = "RPDF.kyijgnes.Running"          # setup 이 앱이 켜져 있는지 보는 이름(make_setup.py 가 setup.iss 에 넘긴다)
+MUTEX_NAME = f"{APP_ID}.kyijgnes.Running"     # setup 이 앱이 켜져 있는지 보는 이름(make_setup.py 가 setup.iss 에 넘긴다)
 SOURCE_ENV = "PDFAPP_UPDATE_SOURCE"
 SIG_NAME = "latest.sig"                     # latest.json 의 배포자 서명(release.py 가 릴리스에 붙인다)
 AFTER_FLAG = "--after-update"               # setup 이 업데이트 뒤 다시 켤 때 붙인다
@@ -40,9 +42,9 @@ REOPEN_KEY = "reopen_after_update"          # settings.json: 업데이트 직전
 # 받을 수 있는 자리. GitHub 릴리스 파일은 github.com 에서 release-assets(예전엔 objects).githubusercontent.com 으로 넘겨준다
 ALLOWED_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
 MAX_SMALL = 64 * 1024                       # latest.json·서명·정책 파일은 작다. 이보다 크면 읽지 않는다
-_UA = {"User-Agent": f"RPDF-updater/{VERSION}"}   # 머리말은 latin-1 만 된다
+_UA = {"User-Agent": f"{APP_ID}-updater/{VERSION}"}   # 머리말은 latin-1 만 된다(그래서 영어 APP_ID)
 # 받은 setup 은 내 사용자 폴더에만(TEMP 가 C:\Users\Public 아래로 잡힌 PC 가 있다. 남이 바꿔 끼울 수 있는 자리에서 실행하지 않게)
-_DOWNLOAD_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "Temp", "RPDF-update")
+_DOWNLOAD_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "Temp", f"{APP_ID}-update")
 _mutex = None
 
 
@@ -237,7 +239,7 @@ def download(rel: Release, progress=None) -> str:
 
 def authenticode(path: str) -> str:
     """윈도우 코드 서명 상태: 'signed'(믿을 수 있는 서명) · 'unsigned'(서명 없음) · 'bad'(서명이 있는데 틀림) · 'unknown'.
-    RPDF setup 은 아직 코드 서명을 하지 않는다(인증서 없음). 그래서 'unsigned' 는 통과시키고, 믿는 근거는 배포자 서명+sha256 이다.
+    우리 setup 은 아직 코드 서명을 하지 않는다(인증서 없음). 그래서 'unsigned' 는 통과시키고, 믿는 근거는 배포자 서명+sha256 이다.
     나중에 코드 서명을 하게 되면 여기서 'signed' 만 받게 바꾼다."""
     if os.name != "nt":
         return "unknown"

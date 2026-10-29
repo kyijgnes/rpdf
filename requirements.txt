@@ -1,4 +1,4 @@
-# RPDF 가 쓰는 패키지(GitHub Actions 빌드가 이것으로 깐다). 이 PC 에서 돌려 본 버전 그대로 묶는다
+# PDF메트리가 쓰는 패키지(GitHub Actions 빌드가 이것으로 깐다). 이 PC 에서 돌려 본 버전 그대로 묶는다
 PySide6==6.12.0
 PyMuPDF==1.27.2.3
 pikepdf==10.17.0

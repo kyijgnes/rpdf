@@ -5,7 +5,6 @@ import json
 import math
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,9 +34,9 @@ from .start import StartPage
 from .update import UpdateUI
 from .viewer import PageView
 
-from ..appinfo import APP_ID, APP_NAME, ICON, OLD_APP_IDS, VERSION  # noqa: E402
+from ..appinfo import APP_NAME, ICON, VERSION, copy_old_data, data_dir  # noqa: E402
 
-SETTINGS = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_ID, "settings.json")
+SETTINGS = os.path.join(data_dir(), "settings.json")
 PDF_FILTER = "PDF 파일 (*.pdf);;모든 파일 (*)"
 # 리본 단추 앞머리 → 꾸미기 종류(「watermark_update」 는 워터마크 업데이트)
 DECO_KEYS = {"watermark": "watermark", "background": "background", "headerfooter": "header_footer",
@@ -54,24 +53,8 @@ def _engine(name: str):
         raise RuntimeError(f"{name} 엔진을 아직 쓸 수 없습니다 ({e})") from e
 
 
-def _copy_old_settings():
-    """이름을 바꾸면 설정 폴더(%APPDATA% 아래 APP_ID 폴더)도 바뀐다. 새 자리가 비었으면 옛 이름 자리의 설정을 복사해 온다(옛 exe 도 그대로 쓰게 옮기지 않고 복사)."""
-    if os.path.exists(SETTINGS):
-        return
-    root = os.path.dirname(os.path.dirname(SETTINGS))
-    for old in OLD_APP_IDS:
-        src = os.path.join(root, old, "settings.json")
-        if old != APP_ID and os.path.isfile(src):
-            try:
-                os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
-                shutil.copy2(src, SETTINGS)
-            except OSError:
-                pass
-            return
-
-
 def load_settings() -> dict:
-    _copy_old_settings()
+    copy_old_data()
     try:
         with open(SETTINGS, encoding="utf-8") as f:
             return json.load(f)
@@ -222,7 +205,7 @@ class MainWindow(QMainWindow):
         self.resize(1360, 820)
         self.setWindowIcon(QIcon(ICON) if os.path.isfile(ICON) else icons.icon("thumbs", 32, theme.ACCENT))
         self.tabs: list[DocTab] = []
-        self._receiver = None   # 다른 데서 켠 RPDF 가 파일을 넘겨 오는 곳(single.Receiver)
+        self._receiver = None   # 다른 데서 켠 PDF메트리가 파일을 넘겨 오는 곳(single.Receiver)
         self._closing = False   # 창을 닫는 중(탭마다 설정을 쓰지 않고 끝에 한 번)
         self._build()
         self.apply_theme()
@@ -263,7 +246,7 @@ class MainWindow(QMainWindow):
                     self.open_path(p)
 
     def open_forwarded(self, paths: list[str]):
-        """다른 데서 켠 RPDF 가 넘긴 파일을 이 창의 탭으로 연다. 파일이 없으면 창만 앞으로."""
+        """다른 데서 켠 PDF메트리가 넘긴 파일을 이 창의 탭으로 연다. 파일이 없으면 창만 앞으로."""
         if self.isMinimized():   # 최대화였으면 최대화로 되돌아온다
             self.setWindowState((self.windowState() & ~Qt.WindowState.WindowMinimized) | Qt.WindowState.WindowActive)
         self.raise_(); self.activateWindow()
@@ -595,7 +578,7 @@ class MainWindow(QMainWindow):
                     self._receiver.listen()
                 e.ignore(); return
         save_settings(self.settings)
-        if self._receiver:   # 이 뒤에 켜지는 RPDF 는 넘기지 않고 제 창을 띄운다
+        if self._receiver:   # 이 뒤에 켜지는 PDF메트리는 넘기지 않고 제 창을 띄운다
             from .. import single
             single.release()
         e.accept()
@@ -1674,7 +1657,7 @@ class MainWindow(QMainWindow):
         from ..engine import annot_xfdf as X
         if key == "export":
             out, flt = QFileDialog.getSaveFileName(self, "주석 내보내기", self._suggest(t, ".xfdf"),
-                                                   "XFDF (*.xfdf);;FDF (*.fdf);;RPDF JSON (*.json)")
+                                                   "XFDF (*.xfdf);;FDF (*.fdf);;PDF메트리 JSON (*.json)")
             if not out: return
             ext = os.path.splitext(out)[1].lower() or {"F": ".fdf", "R": ".json"}.get(flt[:1], ".xfdf")
             skipped = 0

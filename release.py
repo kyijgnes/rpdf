@@ -1,4 +1,4 @@
-"""RPDF 새 버전 내기(클로드 쿨다운과 같은 방식): 버전 올리기 → 빈 annotated 태그 → push → GitHub Actions 가 빌드·설치 프로그램·릴리스.
+"""PDF메트리(옛 RPDF) 새 버전 내기(클로드 쿨다운과 같은 방식): 버전 올리기 → 빈 annotated 태그 → push → GitHub Actions 가 빌드·설치 프로그램·릴리스.
 
     python release.py                         끝자리 +1 (0.1.0 → 0.1.1) 로 올려 내놓는다
     python release.py 0.2.0                   그 버전으로
@@ -357,7 +357,7 @@ def build_only(as_version: str | None):
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="RPDF 새 버전 내기")
+    ap = argparse.ArgumentParser(description="PDF메트리 새 버전 내기")
     ap.add_argument("version", nargs="?", help="올릴 버전(세 자리). 빼면 끝자리 +1")
     ap.add_argument("--counts", action="store_true", help="내려받은 횟수 적기·보기")
     ap.add_argument("--prune", action="store_true", help="횟수를 적고 옛 릴리스 지우기")

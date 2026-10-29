@@ -1,4 +1,4 @@
-# 릴리스 만들기: RPDF 설치 프로그램(setup exe) + latest.json
+# 릴리스 만들기: PDF메트리 설치 프로그램(setup exe) + latest.json
 #
 # 태그를 밀면(v0.1.1 처럼) 윈도우 러너가 빌드(PyInstaller) → 설치 프로그램(Inno Setup) → 릴리스에 붙인다.
 # 태그는 release.py 가 만든다(버전 올리기·annotated 빈 태그·push). 손으로 setup 을 올리지 않는다.
@@ -67,11 +67,11 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            release/RPDF-setup-${{ steps.ver.outputs.version }}.exe
+            release/PDFmetry-setup-${{ steps.ver.outputs.version }}.exe
             release/latest.json
           generate_release_notes: false
           body: |
             ## ▼▼ 다운로드 ▼▼
-            ## [RPDF-setup-${{ steps.ver.outputs.version }}.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/RPDF-setup-${{ steps.ver.outputs.version }}.exe)
+            ## [PDFmetry-setup-${{ steps.ver.outputs.version }}.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/PDFmetry-setup-${{ steps.ver.outputs.version }}.exe)
             ## ▲▲▲▲▲▲▲▲
           make_latest: "true"

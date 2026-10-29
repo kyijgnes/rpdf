@@ -13,7 +13,7 @@ import time
 
 from .appinfo import APP_ID, ORG
 
-# 설치본과 소스 실행(개발)은 따로 논다. 개발 중에 띄운 창이 설치된 RPDF 로 넘어가지 않게
+# 설치본과 소스 실행(개발)은 따로 논다. 개발 중에 띄운 창이 설치된 PDF메트리로 넘어가지 않게
 _TAG = f"{ORG}.{APP_ID}" + ("" if getattr(sys, "frozen", False) else ".dev")
 _USER = os.environ.get("USERNAME", "")
 SERVER = f"{_TAG}.open.{_USER}"

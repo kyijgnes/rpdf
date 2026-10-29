@@ -75,7 +75,7 @@ def show():
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="RPDF 서명키")
+    ap = argparse.ArgumentParser(description="PDF메트리 서명키")
     ap.add_argument("--make", action="store_true", help="키 두 벌 만들기")
     a = ap.parse_args()
     make() if a.make else show()
