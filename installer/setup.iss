@@ -72,6 +72,22 @@ Root: HKCU; Subkey: "Software\Classes\{#ProgId}\Application"; ValueType: string;
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}\Application"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: """{app}\{#AppExe}"",0"
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}\Application"; ValueType: string; ValueName: "ApplicationCompany"; ValueData: "{#Org}"
 Root: HKCU; Subkey: "Software\Classes\.pdf\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue
+; 옛 이름 ProgID 는 지우지 않고 새 exe 를 가리키게 둔다. 사람이 고른 기본 앱(UserChoice·UserChoiceLatest)이 옛 이름을 붙들고 있어
+; 지우면 두 번 눌러도 안 열리고 앱 선택 창만 되풀이된다(10-29 이 PC). 연결 목록(OpenWithProgids)에는 안 넣어 두 줄로 뜨지 않게
+Root: HKCU; Subkey: "Software\Classes\{#OldProgId}"; ValueType: string; ValueName: ""; ValueData: "PDF 문서"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\{#OldProgId}"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "PDF 문서 ({#AppName})"
+Root: HKCU; Subkey: "Software\Classes\{#OldProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"",0"
+Root: HKCU; Subkey: "Software\Classes\{#OldProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\{#OldProgId}\Application"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#AppName}"
+Root: HKCU; Subkey: "Software\Classes\{#OldProgId}\Application"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: """{app}\{#AppExe}"",0"
+Root: HKCU; Subkey: "Software\Classes\{#OldProgId}\Application"; ValueType: string; ValueName: "ApplicationCompany"; ValueData: "{#Org}"
+Root: HKCU; Subkey: "Software\Classes\{#Old2ProgId}"; ValueType: string; ValueName: ""; ValueData: "PDF 문서"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\{#Old2ProgId}"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "PDF 문서 ({#AppName})"
+Root: HKCU; Subkey: "Software\Classes\{#Old2ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"",0"
+Root: HKCU; Subkey: "Software\Classes\{#Old2ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\{#Old2ProgId}\Application"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#AppName}"
+Root: HKCU; Subkey: "Software\Classes\{#Old2ProgId}\Application"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: """{app}\{#AppExe}"",0"
+Root: HKCU; Subkey: "Software\Classes\{#Old2ProgId}\Application"; ValueType: string; ValueName: "ApplicationCompany"; ValueData: "{#Org}"
 Root: HKCU; Subkey: "Software\Classes\Applications\{#AppExe}"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#AppName}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: ".pdf"; ValueData: ""
 Root: HKCU; Subkey: "Software\Classes\Applications\{#AppExe}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
@@ -294,15 +310,14 @@ begin
     // 바로 앞 이름(0.2.1 까지 RPDF…)으로 등록한 것. 10-29 에 PDFmetry… 로 바꿈(make_setup.py 의 OLD_*)
     if RegQueryStringValue(HKCU, 'Software\Classes\.pdf', '', V) and (CompareText(V, '{#OldProgId}') = 0) then
       RegDeleteValue(HKCU, 'Software\Classes\.pdf', '');
+    // ProgID 열쇠 자체는 [Registry] 가 새 exe 로 다시 적은 것이라 지우지 않는다(위 「옛 이름 ProgID」)
     RegDeleteValue(HKCU, 'Software\Classes\.pdf\OpenWithProgids', '{#OldProgId}');
-    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\{#OldProgId}');
     RegDeleteValue(HKCU, 'Software\RegisteredApplications', '{#OldRegApp}');
     RegDeleteKeyIncludingSubkeys(HKCU, '{#OldRegKey}');
     // 그 전 이름(0.1.3 까지 PDFEditor…)
     if RegQueryStringValue(HKCU, 'Software\Classes\.pdf', '', V) and (CompareText(V, '{#Old2ProgId}') = 0) then
       RegDeleteValue(HKCU, 'Software\Classes\.pdf', '');
     RegDeleteValue(HKCU, 'Software\Classes\.pdf\OpenWithProgids', '{#Old2ProgId}');
-    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\{#Old2ProgId}');
     RegDeleteValue(HKCU, 'Software\RegisteredApplications', '{#Old2RegApp}');
     RegDeleteKeyIncludingSubkeys(HKCU, '{#Old2RegKey}');
     DropOldDir();
