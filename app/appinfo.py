@@ -7,7 +7,7 @@ APP_NAME = "PDF메트리"    # 화면에 보이는 이름(창 제목·도움말�
 APP_ID = "PDFmetry"       # exe·설정 폴더 이름(띄어쓰기 없이, 영어로)
 OLD_APP_IDS = ("RPDF", "PDF편집기")  # 예전 APP_ID(새것부터). 처음 켤 때 그 설정 폴더를 새 자리로 복사한다
 ORG = "kyijgnes"
-VERSION = "0.2.1"         # 설치 프로그램·업데이트가 대조하는 버전
+VERSION = "0.2.2"         # 설치 프로그램·업데이트가 대조하는 버전
 
 # 앱 아이콘(창·작업표시줄·exe·설치 프로그램 공용). exe 안에서는 PyInstaller 가 풀어 둔 자리(_MEIPASS)에서 찾는다
 ICON = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "app.ico")
