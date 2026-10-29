@@ -32,10 +32,13 @@ PROGID = "PDFmetry.kyijgnes.Document"                # .pdf 연결
 REG_KEY = r"Software\kyijgnes\PDFmetry"              # 기본 앱 목록(Capabilities) 자리
 REG_APP = "PDFmetry.kyijgnes"                        # RegisteredApplications 값 이름
 ASSET = "PDFmetry"                                   # GitHub 에 올리는 파일 이름(영어로. 한글 이름은 GitHub 이 바꿔 버린다)
-OLD_PROGID = "RPDF.kyijgnes.Document"                # 0.1.4~0.2.1 이 쓰던 이름들(그 전 PDFEditor… 는 0.1.4 setup 이 걷었다)
+OLD_PROGID = "RPDF.kyijgnes.Document"                # 0.1.4~0.2.1 이 쓰던 이름들
 OLD_REG_KEY = r"Software\kyijgnes\RPDF"
 OLD_REG_APP = "RPDF.kyijgnes"
 OLD_MUTEX = "RPDF.kyijgnes.Running"                  # 0.2.1 이하에서 업데이트할 때 그 앱이 꺼지기를 기다리려고
+OLD2_PROGID = "PDFEditor.kyijgnes.Document"          # 0.1.0~0.1.3 이 쓰던 이름들(10-29 이 PC 에 아직 남아 있어 같이 걷는다)
+OLD2_REG_KEY = r"Software\kyijgnes\PDFEditor"
+OLD2_REG_APP = "PDFEditor.kyijgnes"
 LEGACY_ID = "PDF편집기"                              # 10-19 손 설치(dist 를 가리키던 바로 가기·Software\PDF편집기)를 걷을 때
 
 
@@ -78,6 +81,7 @@ def make_setup(root: str, out: str | None = None) -> str:
         "AppGuid": INNO_GUID, "ProgId": PROGID, "RegKey": REG_KEY, "RegKeyParent": REG_KEY.rsplit("\\", 1)[0],
         "RegAppName": REG_APP, "AppMutex": MUTEX_NAME, "LegacyId": LEGACY_ID,
         "OldProgId": OLD_PROGID, "OldRegKey": OLD_REG_KEY, "OldRegApp": OLD_REG_APP, "OldMutex": OLD_MUTEX,
+        "Old2ProgId": OLD2_PROGID, "Old2RegKey": OLD2_REG_KEY, "Old2RegApp": OLD2_REG_APP,
         "SourceDir": dist, "OutputDir": out, "OutputBase": setup_name(version)[:-4],
     }
     icon = os.path.join(root, "assets", "app.ico")

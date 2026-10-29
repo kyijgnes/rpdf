@@ -298,6 +298,13 @@ begin
     RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\{#OldProgId}');
     RegDeleteValue(HKCU, 'Software\RegisteredApplications', '{#OldRegApp}');
     RegDeleteKeyIncludingSubkeys(HKCU, '{#OldRegKey}');
+    // 그 전 이름(0.1.3 까지 PDFEditor…)
+    if RegQueryStringValue(HKCU, 'Software\Classes\.pdf', '', V) and (CompareText(V, '{#Old2ProgId}') = 0) then
+      RegDeleteValue(HKCU, 'Software\Classes\.pdf', '');
+    RegDeleteValue(HKCU, 'Software\Classes\.pdf\OpenWithProgids', '{#Old2ProgId}');
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\{#Old2ProgId}');
+    RegDeleteValue(HKCU, 'Software\RegisteredApplications', '{#Old2RegApp}');
+    RegDeleteKeyIncludingSubkeys(HKCU, '{#Old2RegKey}');
     DropOldDir();
   end;
 end;
